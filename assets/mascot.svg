@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <title>FELF mascot: half fox, half elf</title>
+  <defs>
+    <!-- Roughens every edge a little, like a thick brush. -->
+    <filter id="brush" x="-5%" y="-5%" width="110%" height="110%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.035" numOctaves="2" seed="7" result="n"/>
+      <feDisplacementMap in="SourceGraphic" in2="n" scale="9" xChannelSelector="R" yChannelSelector="G"/>
+    </filter>
+  </defs>
+  <rect width="512" height="512" fill="#ffffff"/>
+  <!-- the tunic runs off the bottom edge; the brush filter cannot reach past the canvas -->
+  <rect x="130" y="480" width="262" height="32" fill="#7DB36A"/>
+  <g filter="url(#brush)">
+    <!-- tail, peeking over the right shoulder -->
+    <path d="M330 440 C 380 430, 420 400, 430 350 C 440 300, 410 262, 418 228 C 424 200, 458 192, 478 214 C 500 250, 502 320, 486 372 C 470 424, 420 470, 360 476 Z" fill="#E9843F"/>
+    <path d="M418 228 C 424 200, 458 192, 478 214 C 488 230, 492 250, 490 268 C 474 258, 450 254, 430 262 C 420 252, 416 240, 418 228 Z" fill="#FFF1DE"/>
+    <!-- tunic -->
+    <path d="M104 530 C 106 448, 146 392, 212 378 C 244 372, 272 372, 302 378 C 368 392, 408 446, 410 530 Z" fill="#7DB36A"/>
+    <!-- leaf brooch -->
+    <path d="M300 446 C 314 428, 338 428, 344 436 C 336 452, 316 458, 300 446 Z" fill="#4E8C46"/>
+    <!-- fluffy fox-fur collar -->
+    <path d="M174 384 C 192 358, 228 364, 238 376 C 250 356, 278 358, 288 378 C 302 360, 334 364, 342 386 C 322 414, 282 420, 256 412 C 228 422, 190 414, 174 384 Z" fill="#FFF1DE"/>
+    <!-- neck -->
+    <path d="M234 350 C 236 362, 238 372, 240 380 C 252 384, 264 384, 274 379 C 276 370, 278 360, 280 350 Z" fill="#F7D3B7"/>
+    <!-- elf ears, long and pointed -->
+    <path d="M176 258 C 152 252, 120 236, 96 214 C 108 250, 140 286, 180 302 Z" fill="#F7D3B7"/>
+    <path d="M336 258 C 360 252, 392 236, 416 214 C 404 250, 372 286, 332 302 Z" fill="#F7D3B7"/>
+    <!-- face -->
+    <path d="M168 262 C 166 200, 206 168, 258 168 C 312 170, 346 206, 344 264 C 342 318, 306 360, 256 362 C 204 360, 170 318, 168 262 Z" fill="#F7D3B7"/>
+    <!-- fox ears -->
+    <path d="M156 216 C 152 160, 158 104, 176 64 C 206 88, 232 120, 248 168 Z" fill="#E9843F"/>
+    <path d="M356 216 C 360 160, 354 104, 336 64 C 306 88, 280 120, 264 168 Z" fill="#E9843F"/>
+    <path d="M180 152 C 178 128, 182 106, 188 92 C 204 108, 216 126, 222 144 Z" fill="#FFF1DE"/>
+    <path d="M332 152 C 334 128, 330 106, 324 92 C 308 108, 296 126, 290 144 Z" fill="#FFF1DE"/>
+    <path d="M170 92 C 172 80, 174 72, 176 64 C 186 72, 194 78, 200 86 C 190 84, 180 86, 170 92 Z" fill="#7A4630"/>
+    <path d="M342 92 C 340 80, 338 72, 336 64 C 326 72, 318 78, 312 86 C 322 84, 332 86, 342 92 Z" fill="#7A4630"/>
+    <!-- side locks -->
+    <path d="M164 236 C 158 262, 162 294, 174 318 C 182 300, 186 274, 184 246 Z" fill="#E9843F"/>
+    <path d="M348 236 C 354 262, 350 294, 338 318 C 330 300, 326 274, 328 246 Z" fill="#E9843F"/>
+    <!-- hair with a crooked fringe -->
+    <path d="M160 248 C 150 190, 186 140, 256 136 C 326 138, 364 186, 352 250 C 340 236, 336 220, 330 208 C 320 224, 304 230, 292 226 C 296 214, 296 204, 292 196 C 276 214, 252 222, 232 220 C 238 210, 240 202, 238 196 C 220 212, 200 220, 186 222 C 180 232, 170 242, 160 248 Z" fill="#E9843F"/>
+    <!-- eyes -->
+    <ellipse cx="220" cy="278" rx="11" ry="14" fill="#3A2E2C"/>
+    <ellipse cx="294" cy="278" rx="11" ry="14" fill="#3A2E2C"/>
+    <!-- blush -->
+    <ellipse cx="196" cy="310" rx="18" ry="10" fill="#F4A5A0"/>
+    <ellipse cx="318" cy="310" rx="18" ry="10" fill="#F4A5A0"/>
+    <!-- fox nose and a small w-mouth -->
+    <path d="M250 302 C 254 300, 260 300, 264 302 C 262 308, 252 308, 250 302 Z" fill="#3A2E2C"/>
+    <path d="M243 314 C 247 322, 254 322, 257 314 C 260 322, 267 322, 271 314" fill="none" stroke="#3A2E2C" stroke-width="4" stroke-linecap="round"/>
+  </g>
+</svg>

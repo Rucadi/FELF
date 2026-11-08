@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/mascot.png" width="240" alt="FELF's mascot: a half-fox, half-elf character with orange fox ears and tail, pointed elf ears and a green tunic">
+</p>
+
 # FELF — Fat ELF
 
 **One executable file. Its own glibc. Runs on any Linux of the same

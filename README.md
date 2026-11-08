@@ -87,6 +87,18 @@ chmod +x felf-0.1.0-x86_64-linux
 Releases are built by `.github/workflows/release.yml` when a tag `vX.Y.Z`
 matching `felfVersion` in `nix/default.nix` is pushed.
 
+### CMake projects
+
+`cmake/FELF.cmake` (also attached to each release) packs a project's
+programs as part of its build, with a released felf it downloads at
+configure time when none is installed ([docs/cmake.md](docs/cmake.md)):
+
+```cmake
+include(FELF.cmake)
+add_executable(app main.c)
+felf_pack(app-felf TARGET app LAZY INSTALL_DESTINATION bin)   # app.felf
+```
+
 ### Bundling a normal Nix package
 
 `nix/lib/bundle.nix` turns a normal Nix derivation into a FELF **tree** by
@@ -567,7 +579,8 @@ system libraries are needed besides a C compiler and libc.
 | `nix/` | Nix package set: `pkgs/` (felf, bootstrap, runtime), `lib/` (`bundle.nix`, `tarball.nix`), `bundles/` (GCC, Krita), `examples/` (OCI image), `tests/` |
 | `tests/` | Integration fixtures and CTest suite |
 | `docker/` | `ubuntu.Dockerfile`: the build and tests without Nix |
-| `docs/` | Architecture, format, packing, runtime, Nix, security |
+| `cmake/` | `FELF.cmake`: `felf_pack()` for CMake projects |
+| `docs/` | Architecture, format, packing, runtime, CMake, Nix, security |
 | `flake.nix`, `default.nix` | Entry points (flake, and without flakes) for `nix/` |
 | `third_party/` | Vendored SQLite and zstd sources |
 

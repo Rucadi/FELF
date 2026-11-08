@@ -6,6 +6,7 @@ lib.fileset.toSource {
   root = ../.;
   fileset = lib.fileset.unions [
     ../CMakeLists.txt
+    ../cmake
     ../src
     ../tests
     ../third_party

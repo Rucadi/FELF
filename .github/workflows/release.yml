@@ -52,6 +52,10 @@ jobs:
             echo "::error::tag $TAG does not match felfVersion $version"
             exit 1
           fi
+          if ! grep -q "^set(_FELF_MODULE_VERSION \"$version\")$" cmake/FELF.cmake; then
+            echo "::error::cmake/FELF.cmake is not at version $version"
+            exit 1
+          fi
 
       - name: Build felf
         run: nix build -L .#felf -o result-felf
@@ -78,14 +82,28 @@ jobs:
       TAG: ${{ inputs.tag || github.ref_name }}
       GH_TOKEN: ${{ github.token }}
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
       - uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
 
-      - name: Checksums
-        working-directory: dist
-        run: sha256sum felf-* > SHA256SUMS && cat SHA256SUMS
+      # FELF.cmake carries the checksums of the binaries it downloads.
+      - name: Checksums and FELF.cmake
+        run: |
+          version=${TAG#v}
+          cp cmake/FELF.cmake dist/FELF.cmake
+          for arch in x86_64 aarch64; do
+            sum=$(sha256sum "dist/felf-$version-$arch-linux" | cut -d' ' -f1)
+            sed -i "s/^set(_FELF_SHA256_$arch \"\")$/set(_FELF_SHA256_$arch \"$sum\")/" dist/FELF.cmake
+            grep -q "_FELF_SHA256_$arch \"$sum\"" dist/FELF.cmake
+          done
+          cd dist
+          sha256sum felf-* FELF.cmake > SHA256SUMS
+          cat SHA256SUMS
 
       - name: Publish release
         run: |

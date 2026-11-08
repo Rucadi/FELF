@@ -615,6 +615,15 @@ felf_add_script_test(pack/reproducibility reproducibility.cmake
     -DHELLO=${FELF_HELLO})
 set_tests_properties(pack/reproducibility PROPERTIES LABELS "pack")
 
+# cmake/FELF.cmake, used by a project of its own.
+felf_add_script_test(cmake/module cmake-module.cmake
+    -DFELF=${felf_cli}
+    -DWORK=${FELF_TEST_WORK}
+    -DPROJECT=${CMAKE_CURRENT_SOURCE_DIR}/cmake-module
+    -DMODULE=${PROJECT_SOURCE_DIR}/cmake/FELF.cmake
+    -DGENERATOR=${CMAKE_GENERATOR})
+set_tests_properties(cmake/module PROPERTIES LABELS "pack;cmake" TIMEOUT 300)
+
 # --------------------------------------------------------------------------
 # Compression
 

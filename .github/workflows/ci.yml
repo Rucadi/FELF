@@ -57,6 +57,18 @@ jobs:
         continue-on-error: ${{ matrix.experimental == true }}
         run: nix build -L .#felf-tests .#felf-reproducibility .#bundle-hello-test
 
+      # cmake/FELF.cmake in a project that does not use Nix, with the
+      # runner's own compiler and glibc.
+      - name: CMake module
+        continue-on-error: ${{ matrix.experimental == true }}
+        run: |
+          cmake -S tests/cmake-module -B build/cmake-module \
+            -DFELF_MODULE="$PWD/cmake/FELF.cmake" \
+            -DFELF_EXECUTABLE="$PWD/result-felf/bin/felf"
+          cmake --build build/cmake-module
+          ./result-felf/bin/felf verify build/cmake-module/app.felf
+          ./build/cmake-module/app.felf | grep 'greet extra env=packed'
+
       - uses: actions/upload-artifact@v4
         with:
           name: felf-${{ matrix.system }}

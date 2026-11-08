@@ -12,6 +12,7 @@ architecture, without installation and without extracting files to disk.
 | [format.md](format.md) | File layout, footer, embedded database, object storage |
 | [packing.md](packing.md) | `felf pack`: options, dependency resolution, checks |
 | [runtime.md](runtime.md) | Bootstrap, loader handoff, audit module, runtime shim, direct mapping |
+| [cmake.md](cmake.md) | `cmake/FELF.cmake`: packing a CMake project's programs with a released felf |
 | [nix.md](nix.md) | The Nix packages, `bundle.nix`, `nix bundle`, tarballs, the OCI example |
 | [security.md](security.md) | What FELF guarantees and what it does not |
 

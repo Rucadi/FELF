@@ -4,126 +4,132 @@
 felf pack [NAME=]PROGRAM -o OUT [options]
 ```
 
-`felf --help` lists the options.  An argument `@FILE` is replaced by the
-lines of FILE, one argument per line (empty lines and `#` comments are
-skipped), for argument lists too long for a command line:
-
-```text
---include=/path/to/libfoo.so.1
---plugin=/path/to/tree/lib/plugins/libbar.so
-```
+`@FILE` in the arguments is replaced by FILE's lines, one argument each
+(empty lines and `#` comments skipped), for lists too long for a command
+line.
 
 ## Options
 
 | Option | Effect |
 |---|---|
-| `-o PATH` | The FELF to write (written to a temporary file and renamed) |
-| `--program [NAME=]PATH` | Another program in the same FELF, run when the FELF is invoked as NAME (a symlink to it).  Programs share the libraries.  A second name for an already embedded file becomes an alias, so multicall binaries keep one copy. |
-| `--alias PROGRAM=NAME[,NAME...]` | More names for an embedded program (a multicall binary such as coreutils or busybox): invoked as NAME, it runs with NAME as `argv[0]`.  PROGRAM is a program name or one of its aliases; NAME must not name another object. |
-| `--compress LEVEL\|none` | Without it, libraries are stored uncompressed and mapped from the file, and the other objects are compressed at zstd level 19.  A LEVEL (1-22) compresses everything at that level, the libraries too, for a smaller file: they are then decompressed into memfds at start instead of mapped.  `none` compresses nothing. |
-| `--permissive` | Names the FELF does not bundle may be loaded from the host.  The default is strict: only bundled objects, files under the bundle root, and the host graphics stack. |
-| `--lazy` | Libraries are loaded on demand by name through the audit module.  Without it, libraries kept in memfds are also preloaded with `LD_PRELOAD`. |
-| `--include PATH` | Embed a shared object and its dependencies, for libraries the program only `dlopen`s.  A library whose name is already bundled is skipped; one that is not a library for the target or whose dependencies cannot be found is a warning. |
-| `--plugin PATH` | A library that stays a file outside the FELF (a plugin in a tree bundle): its dependencies are embedded.  Unresolvable dependencies are a warning. |
-| `--root REL` | The top of the directory tree the FELF is part of, relative to the FELF's directory (default: that directory); for example `..` for `tree/bin/app`.  Resolved from the FELF's location at each start, so the tree can be moved.  `$FELF_ROOT` points there, and strict mode allows loading files under it (plugins kept as files). |
-| `--env NAME=VALUE` | A variable set for the application, overriding the caller's |
-| `--lib-dir DIR` | Another directory to find the libraries to embed in, searched after the standard ones (see below).  Used at pack time only. |
-| `--host-lib PATTERN` | Prefer the host's copy of matching libraries (a name, or a prefix ending in `*`) |
-| `--no-default-host-libs` | Do not prefer the host's graphics stack |
+| `-o PATH` | Output, written to a temporary file and renamed |
+| `--program [NAME=]PATH` | Another program sharing the libraries, run when invoked as NAME. The same file twice becomes an alias. |
+| `--alias PROG=NAME[,NAME…]` | More names for a multicall program; it runs with NAME as `argv[0]` |
+| `--compress LEVEL\|none` | See [compression](#compression) |
+| `--lazy` | Load libraries on demand through the audit module. Without it, memfd libraries are also put in `LD_PRELOAD`. |
+| `--permissive` | Names the FELF doesn't bundle may come from the host. Default: strict. |
+| `--include PATH` | Embed a library the program only `dlopen`s, and its dependencies. Already bundled names are skipped; failures are warnings. |
+| `--plugin PATH` | Keep a library as a file outside the FELF, embed its dependencies |
+| `--root REL` | The tree's top, relative to the FELF's directory (`..` for `tree/bin/app`). Becomes `$FELF_ROOT`; files under it may load in strict mode. |
+| `--env NAME=VALUE` | Set a variable for the program; `$FELF_ROOT`, `$FELF_APP`, `$VAR`, `$$` are expanded at start |
+| `--lib-dir DIR` | Extra directory to find libraries in, at pack time only |
+| `--host-lib PATTERN` | Prefer the host's copy of a library (name, or prefix ending in `*`) |
+| `--no-default-host-libs` | Don't prefer the host's graphics stack |
 
-The bootstrap, audit module and shim are built into `felf`;
-`FELF_BOOTSTRAP`, `FELF_AUDIT` and `FELF_SHIM` name other files to use
-instead (for example builds for another architecture).
+`FELF_BOOTSTRAP`, `FELF_AUDIT` and `FELF_SHIM` name files to embed instead
+of the ones built into `felf`, for example builds for another architecture.
 
-## The runtime: FELF's glibc
+## What gets embedded
 
-`felf` carries FELF's glibc (`felf --version` names it): nixpkgs' glibc
-libraries and its dynamic linker patched to map libraries from the FELF file
-(`src/glibc/patches/`).  When it has a loader for the program's architecture,
-every program is bundled with it:
+```mermaid
+flowchart TD
+    N[DT_NEEDED name] --> a{already bundled?}
+    a -->|yes| reuse[reuse it]
+    a -->|no| b{in FELF's glibc?}
+    b -->|yes| g[take glibc's copy]
+    b -->|no| c{in RUNPATH / RPATH?}
+    c -->|yes| emb[embed]
+    c -->|no| d{loader dir, /lib, /usr/lib,<br/>multiarch, /usr/local/lib?}
+    d -->|yes| emb
+    d -->|no| e{--lib-dir?}
+    e -->|yes| emb
+    e -->|no| f{host-preferred?}
+    f -->|yes| skip[leave to the host]
+    f -->|no| err[error]
+```
 
-- its dynamic linker is the FELF's interpreter, whatever the program's own
-  `PT_INTERP` names (the program's loader need not exist on the packing
-  machine);
-- a library found in FELF's glibc (`libc.so.6`, `libm.so.6`, ...) is
-  taken from there before any other directory.
-
-glibc is backward compatible, so programs built for that glibc or an older
-one work, from Nix or from any distribution.  The version check below
-rejects programs that need a newer one.
-
-Every FELF also embeds felf's glibc locale archive (C.UTF-8 and
-en_US.UTF-8); this is not optional.  The bundled glibc has no usable host
-locale location, and the bootstrap names C.UTF-8 when the caller set no
-locale, so `setlocale(LC_ALL, "")` works in an empty container.  See
-[runtime.md](runtime.md).
-
-## Finding dependencies
-
-For each `DT_NEEDED` name, in order:
-
-1. a name already bundled is reused (one copy per name);
-2. FELF's glibc, for glibc's libraries;
-3. the requesting object's `RUNPATH` (or `RPATH` when it has none), with
-   `$ORIGIN`, `$LIB` and `$PLATFORM` expanded;
-4. the loader's directory and the standard directories (`/lib`, `/lib64`,
-   `/usr/lib`, `/usr/lib64`, the multiarch directories, `/usr/local/lib`);
-5. the `--lib-dir` directories.
-
-Only regular files that are ELF objects for the target architecture match;
-32-bit or foreign libraries and linker scripts are skipped.  A name that
-cannot be found is an error, unless it matches a host-preferred pattern:
-then the host provides it at run time.
-
-The architecture comes from the first program.  Every embedded object, and
-the bootstrap, must be built for it.
+- `RUNPATH` (or `RPATH` when there is none) has `$ORIGIN`, `$LIB` and
+  `$PLATFORM` expanded.
+- Only ELF files for the target architecture match; linker scripts and
+  foreign libraries are skipped. The architecture comes from the first
+  program, and every object must match it.
+- Every program runs on **FELF's glibc**, whatever its own `PT_INTERP`
+  says: its `ld.so` becomes the interpreter and glibc's libraries come from
+  it. glibc is backward compatible, so programs built for that glibc or
+  older work, from any distribution.
+- Every FELF embeds a locale archive (C.UTF-8, en_US.UTF-8).
 
 ## Checks
 
-- **Symbol versions.**  Every version an embedded object requires
-  (`DT_VERNEED`, except weak ones) from another embedded object must be
-  defined there (`DT_VERDEF`), as glibc's loader would require.  A program
-  built against a newer glibc fails with `... needs version GLIBC_x of
-  libc.so.6, which the bundled libc.so.6 ... does not define`.
-- **Names.**  Object names are unique; a program name may not contain `/`.
+- **Symbol versions.** Every version an object needs from another embedded
+  object (`DT_VERNEED`, except weak ones) must be defined there. A program
+  built for a newer glibc fails: `… needs version GLIBC_x of libc.so.6,
+  which the bundled libc.so.6 … does not define`.
+- **Names** are unique, and program names have no `/`.
 
-## Storage decisions
+## Compression
 
-Every object's bytes are in the file's payload region; the database only
-holds metadata, including each object's compression.  With FELF's glibc,
-the database records `direct_map`, and:
+| `--compress` | Libraries | Everything else | Start-up |
+|---|---|---|---|
+| *(not given)* | uncompressed, mapped from the file | zstd 19 | fastest, pages shared |
+| `LEVEL` (1-22) | zstd LEVEL, unpacked into memfds | zstd LEVEL | smallest file, every start decompresses |
+| `none` | uncompressed, mapped | uncompressed | largest file |
 
-- libraries (`shared`, `plugin`) are stored uncompressed, at offsets
-  aligned for `mmap`, so the loader maps them from the file (with an
-  explicit `--compress LEVEL` they are compressed and become memfds
-  instead);
-- everything else (program, loader, audit module, shim, locale archive) is
-  compressed, at level 19 unless `--compress` says otherwise.
+Compressed objects are 2 MiB zstd frames, decompressed in parallel on up to
+16 threads. perl, packed both ways on one x86-64 machine:
 
-In every object, `/nix/store/<hash>` strings are rewritten to
-`/nix/store/eeee...` (as nixpkgs' `nuke-refs` does), so Nix sees no
-dependencies in a FELF.  Compression would not hide them: zstd keeps many
-strings as literal bytes.  Those paths no longer resolve, even on a host
-that has them; a FELF does not need them (the bootstrap rewrites the
-program's `PT_INTERP`, and the audit module resolves every library).  A
-path the program itself opens, such as a data directory compiled in as
-`/nix/store/...`, did not exist on other hosts anyway.
+| | default | `--compress 19` |
+|---|---|---|
+| file size | 10.7 MB | 5.1 MB |
+| `perl -e 1` | 3.4 ms | 10.2 ms |
+| memory, 10 processes running (PSS) | 15 MB | 53 MB |
+
+**`/nix/store` scrubbing.** `/nix/store/<hash>` strings in every object
+become `/nix/store/eeee…` (like nixpkgs' `nuke-refs`), so Nix sees no
+dependencies in a FELF. A FELF never needs those paths: the bootstrap sets
+the interpreter and the audit module resolves every library.
+
+## Several programs
+
+Programs in one FELF share every library ([README](../README.md#one-file-a-whole-userland)).
+`argv[0]` picks the program; any other name runs the default (the
+positional input).
+
+```bash
+felf pack hello=./hello --program ./tool --program cli=./cli-real -o bin/hello
+felf pack ./busybox --alias "busybox=$(./busybox --list | paste -sd,)" -o bin/busybox
+FELF_INSTALL_LINKS=bin bin/hello      # bin/tool, bin/cli -> hello
+```
+
+## Host libraries and plugins
+
+The **graphics stack** always comes from the host: libglvnd (`libGL`,
+`libEGL`, `libGLX`, `libOpenGL`, GLES), vendor drivers (`libGLX_*`,
+`libEGL_*`, `libnvidia-*`, `libgallium-*`), Vulkan, DRM/GBM, VA-API/VDPAU
+and CUDA (`src/include/felf_host_libs.h`). A copy found at pack time is
+embedded and used only if the host has none. Host libraries run against
+FELF's glibc, so one built for a newer glibc won't load.
+
+**Plugins** are never embedded. `--plugin` embeds only their dependencies.
+Any plugin links against the embedded libraries; strict mode loads only
+plugins under the bundle root, permissive mode any path.
 
 ## Other commands
 
 | Command | Does |
 |---|---|
-| `felf inspect FILE [--json]` | Summary: modes, programs, objects and their compression |
-| `felf list FILE [--json]` | The objects |
-| `felf verify FILE` | Checks the layout and every object's SHA-256 |
-| `felf extract FILE --output DIR` | Writes every object, decompressed, and the database (`felf.sqlite`) into DIR |
-| `felf sql FILE "SELECT ..."` | Runs a read-only query on the database |
+| `felf inspect FILE [--json]` | modes, programs, objects, compression |
+| `felf list FILE [--json]` | the objects |
+| `felf verify FILE` | layout and every SHA-256 |
+| `felf extract FILE --output DIR` | every object, decompressed, plus `felf.sqlite` |
+| `felf sql FILE "SELECT …"` | read-only query on the index |
 
-## Extracting
+`extract` names files after the objects, with characters outside
+`[A-Za-z0-9._+-]` replaced by `_`, and `.<id>` added when a name repeats or
+would be `felf.sqlite`.
 
-`felf extract FILE --output DIR` writes the database as `DIR/felf.sqlite`
-and every object, decompressed, as `DIR/<name>`: the object's name with
-characters other than `[A-Za-z0-9._+-]` replaced by `_`, and `.<id>`
-(its row in `objects`) appended when that name is not unique or is
-`felf.sqlite`.  The database alone decides the names, so nothing else is
-written.
+## Architectures
+
+x86-64 and aarch64 (`src/include/felf_arch.h`); the full test suite runs on
+both in CI. Packing for aarch64 on x86-64 should work with `FELF_BOOTSTRAP`,
+`FELF_AUDIT` and `FELF_SHIM` pointing at aarch64 builds, but is untested.

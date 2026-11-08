@@ -1,91 +1,85 @@
 # File format
 
-Format version 1 (`FELF_FORMAT_VERSION`, `src/include/felf_format.h`).  All
-integers are little-endian.
+Format version 1 (`src/include/felf_format.h`). Integers are little-endian.
 
 ## Layout
 
-| Region | Where | Contents |
-|---|---|---|
-| Bootstrap | offset 0 | The static bootstrap executable, unchanged.  The kernel only looks at its ELF headers and segments, so whatever follows it is ignored. |
-| Payload | page-aligned after the bootstrap | The stored bytes of every object, each at an offset aligned to the object's largest `PT_LOAD` alignment (at least 4096). |
-| Database | page-aligned after the payload | An SQLite database (below). |
-| Footer | the last 256 bytes | Locates everything else. |
-
-`felf_outer_elf_validate()` checks that the file starts with an executable
-ELF and that the regions do not overlap it.
+```text
+┌────────────┐ 0                   the bootstrap, unchanged; the kernel only
+│ bootstrap  │                     reads its ELF headers, so the rest is ignored
+├────────────┤ page-aligned
+│ payload    │                     each object at its largest PT_LOAD alignment
+├────────────┤ page-aligned        (at least 4096)
+│ SQLite     │
+├────────────┤
+│ footer     │ last 256 bytes
+└────────────┘
+```
 
 ## Footer
 
 `felf_footer_t`, 256 bytes, packed:
 
-| Field | Type | Meaning |
+| Field | Type | Value |
 |---|---|---|
-| `magic` | 8 bytes | `FELF\0\0\0\0` |
+| `magic` | 8 B | `FELF\0\0\0\0` |
 | `format_version` | u32 | 1 |
-| `flags` | u32 | `0x1` strict, `0x10` lazy loading |
-| `container_size` | u64 | Size of the whole file |
-| `db_offset`, `db_size` | u64 | The database |
-| `payload_offset`, `payload_size` | u64 | The payload region |
-| `object_count` | u64 | Rows in `objects` |
-| `index_offset`, `index_size` | u64 | Reserved, 0 |
-| `reserved` | 168 bytes | 0 |
-| `tail_magic` | 8 bytes | `FELFEND\0` |
+| `flags` | u32 | `0x1` strict, `0x10` lazy |
+| `container_size` | u64 | file size |
+| `db_offset`, `db_size` | u64 | the index |
+| `payload_offset`, `payload_size` | u64 | the payload |
+| `object_count` | u64 | rows in `objects` |
+| `index_offset`, `index_size` | u64 | reserved, 0 |
+| `reserved` | 168 B | 0 |
+| `tail_magic` | 8 B | `FELFEND\0` |
 
-The bootstrap and the CLI cross-check the footer against the database:
-strict and lazy must agree, and `object_count` must match.
+The footer and the index must agree on strict, lazy and the object count.
 
-## Database
+## Index
 
-The schema is `src/storage/schema.sql` (`application_id` 1178942534,
-`user_version` 1); `felf sql FILE "SELECT ..."` queries it.  Its header's
-file change counter, schema cookie and version-valid-for are 1, so the
-bytes depend only on the content.
+An SQLite database: `src/storage/schema.sql`, `application_id` 1178942534,
+`user_version` 1. Its header counters are fixed at 1, so its bytes depend
+only on content. Query it with `felf sql FILE "SELECT …"`.
 
-### `objects`
-
-One row per embedded file.
+### `objects`: one row per embedded file
 
 | Column | Meaning |
 |---|---|
-| `name` | Unique name: the SONAME for libraries, the basename otherwise; a program's name is the one it runs as |
-| `soname` | `DT_SONAME`, if any |
-| `kind` | `program`, `interp` (the dynamic linker), `shared` (a library something links against), `plugin` (a library only loaded with `dlopen`, from `--include`), `audit`, `runtime` (the shim), `resource` (the locale archive) |
-| `offset` | File offset of the stored bytes, in the payload region |
-| `size`, `sha256` | Size and SHA-256 of the object's uncompressed bytes |
-| `compression`, `stored_size` | `none`, or `zstd` with the number of stored bytes |
-| `alignment` | The object's largest segment alignment; `offset` is aligned to it |
+| `name` | SONAME for libraries, else the basename; for a program, the name it runs as |
+| `soname` | `DT_SONAME` |
+| `kind` | `program`, `interp` (ld.so), `shared`, `plugin` (from `--include`), `audit`, `runtime` (the shim), `resource` (locale archive) |
+| `offset`, `alignment` | where the bytes are; `offset` is aligned to `alignment` |
+| `size`, `sha256` | of the uncompressed bytes |
+| `compression`, `stored_size` | `none`, or `zstd` and the stored size |
 
-A compressed object is a sequence of independent zstd frames, one per
-2 MiB of the object (`FELF_ZSTD_CHUNK`), so it can be decompressed in
-parallel.  An object that does not shrink is stored uncompressed.
+Compressed objects are independent zstd frames, one per 2 MiB, so they
+decompress in parallel. An object that doesn't shrink is stored as is.
 
 ### Other tables
 
 | Table | Contents |
 |---|---|
-| `aliases` | More names per object: the SONAME, file names it was found under, the names of extra programs that are the same file (a multicall binary such as coreutils) |
-| `dependencies` | Each object's `DT_NEEDED` names |
-| `environment` | Variables set for the application (`--env`); values may use `$FELF_ROOT`, `$FELF_APP` and the caller's `$NAME`, and `$$` is a literal `$` |
-| `package` | Name, version, architecture, ABI and the creating tool |
-| `resources` | Reserved |
-| `meta` | Settings, below |
+| `aliases` | more names per object: SONAMEs, names it was found under, extra program names for the same file |
+| `dependencies` | each object's `DT_NEEDED` |
+| `environment` | `--env` values |
+| `package` | name, version, architecture, ABI, creator |
+| `meta` | settings, below |
+| `resources` | reserved |
 
-### `meta` keys
+### `meta`
 
 | Key | Meaning |
 |---|---|
-| `schema_version`, `format_version`, `created_by` | Versions and the tool that wrote the file |
-| `strict`, `lazy` | As in the footer |
-| `root` | The bundle root, relative to the FELF file's directory (tree bundles) |
-| `program_locations` | `name=path` per line: where each program sits in the tree, relative to the root, so a copy of the FELF placed there finds the root |
-| `default_program` | The program run when `argv[0]` names none |
-| `host_libs` | Patterns of libraries taken from the host first, one per line |
-| `direct_map` | `1` when the bundled loader maps libraries from the file |
+| `schema_version`, `format_version`, `created_by` | versions and writer |
+| `strict`, `lazy` | as in the footer |
+| `root` | bundle root, relative to the FELF's directory |
+| `program_locations` | `name=path` per line: where each program sits in the tree, so a copy placed there finds the root |
+| `default_program` | run when `argv[0]` names no program |
+| `host_libs` | host-preferred patterns, one per line |
+| `direct_map` | `1` when ld.so maps libraries from the file |
 
 ## Integrity
 
-`felf verify` checks the footer, the layout, and the SHA-256 of every
-object.  The bootstrap checks the footer and layout at every start but not
-the hashes.  Checksums detect corruption; they are not signatures
-([security.md](security.md)).
+`felf verify` checks the footer, the layout and every object's SHA-256. The
+bootstrap checks the footer and layout at every start, not the hashes.
+Hashes catch corruption; they are not signatures ([security.md](security.md)).

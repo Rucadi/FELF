@@ -1,20 +1,21 @@
 # FELF documentation
 
-A FELF ("fat ELF") is one executable file that carries a program together
-with everything it needs to run: its shared libraries, its own glibc and
-dynamic linker, and the small runtime pieces that make the embedded copies
-win over whatever the host has.  It runs on any Linux of the same
-architecture, without installation and without extracting files to disk.
+A FELF is one executable file holding a program, its libraries, its own
+glibc and a small runtime. It runs on any Linux of the same architecture,
+without installing or extracting anything.
 
-| Document | Contents |
+| Start here | |
 |---|---|
-| [architecture.md](architecture.md) | The components and how a FELF is built and started |
-| [format.md](format.md) | File layout, footer, embedded database, object storage |
-| [packing.md](packing.md) | `felf pack`: options, dependency resolution, checks |
-| [runtime.md](runtime.md) | Bootstrap, loader handoff, audit module, runtime shim, direct mapping |
-| [cmake.md](cmake.md) | `cmake/FELF.cmake`: packing a CMake project's programs with a released felf |
-| [nix.md](nix.md) | The Nix packages, `bundle.nix`, `nix bundle`, tarballs, the OCI example |
-| [security.md](security.md) | What FELF guarantees and what it does not |
+| [architecture.md](architecture.md) | the pieces, and how a FELF is packed and run |
+| [packing.md](packing.md) | `felf pack`: options, what gets embedded, compression |
+| [runtime.md](runtime.md) | start-up, library lookup, the shim, environment variables |
 
-The glibc patch FELF's loader is built with is described in
-[`../loader/README.md`](../loader/README.md).
+| Reference | |
+|---|---|
+| [format.md](format.md) | file layout, footer, the SQLite index |
+| [security.md](security.md) | what FELF guarantees, and what it doesn't |
+| [cmake.md](cmake.md) | packing from a CMake project |
+| [nix.md](nix.md) | Nix packages, the OCI example, checks |
+| [building.md](building.md) | building FELF and running its tests |
+
+The loader patch is described in [src/glibc/README.md](../src/glibc/README.md).

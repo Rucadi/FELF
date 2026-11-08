@@ -1,6 +1,4 @@
-<p align="center">
-  <img src="assets/mascot.png" width="240" alt="FELF's mascot: a half-fox, half-elf character with orange fox ears and tail, pointed elf ears and a green tunic">
-</p>
+<img src="assets/mascot.png" align="right" width="130" alt="FELF's mascot: a half-fox, half-elf character with orange fox ears and tail, pointed elf ears and a green tunic">
 
 # FELF — Fat ELF
 
@@ -44,11 +42,97 @@ git version 2.56.0
 ```
 
 No need to rebuild nor having a special toolchain: the program is packed with every shared
-library it needs, a private glibc and dynamic linker, and a read-only
-SQLite index into **one file that is still a valid ELF executable**. Copy it to another distribution, an older one, or an empty
-container, and the kernel runs it like any other binary.
+library it needs, a private glibc and dynamic linker. For usage purposes, it's a static binary.
 
-### Binaries, not a filesystem
+## Usage
+
+Pack the program, run the result like the original, copy it anywhere:
+
+```console
+$ felf pack ./myapp -o myapp.felf
+wrote myapp.felf
+$ ./myapp.felf --some --args < input.txt    # arguments, stdin, stdout, exit code: all as usual
+$ scp myapp.felf server: && ssh server ./myapp.felf
+```
+
+Look inside, and check nothing got damaged on the way:
+
+```console
+$ felf inspect git
+FELF Version: 1
+Architecture: x86_64
+Runtime: glibc
+Strict Mode: Enabled
+Lazy Loading: Disabled
+Direct Mapping: Enabled (uncompressed libraries map from the file)
+…
+Embedded Objects (11):
+  git                              program  5074056 bytes (zstd 2083607)
+  ld-linux-x86-64.so.2             interp   280368 bytes (zstd 121807)
+  libc.so.6                        shared   2470424 bytes
+  libpcre2-8.so.0                  shared   747840 bytes
+  libz-ng.so.2                     shared   200440 bytes
+  …
+$ felf verify git
+FELF verification: OK (git)
+```
+
+`felf list`, `felf extract` and `felf sql FILE "SELECT …"` (read-only, on
+the index) go further.
+
+When the defaults aren't enough:
+
+| If… | Add |
+|---|---|
+| the program `dlopen`s a library by name (plugins, codecs) | `--include /path/to/libfoo.so.1` |
+| `felf` can't find a library while packing | `--lib-dir DIR` |
+| it needs an environment variable | `--env NAME=VALUE` |
+| you want the smallest possible file | `--compress 19` |
+| it should use host libraries the FELF doesn't bundle | `--permissive` |
+| several programs should share one file | `--program NAME=PATH` ([below](#one-file-a-whole-userland)) |
+| it needs data or configuration files | ship a tree ([below](#binaries-not-a-filesystem)) |
+| something fails at run time | run it with `FELF_DEBUG=1` |
+
+Every option is in [docs/packing.md](docs/packing.md).
+
+## Get started
+
+**Prebuilt**: the static CLI for x86-64 or aarch64, from the
+[releases](https://github.com/Rucadi/FELF/releases):
+
+```bash
+curl -Lo felf https://github.com/Rucadi/FELF/releases/download/v0.3.0/felf-0.3.0-x86_64-linux
+chmod +x felf
+./felf pack ./myapp -o myapp.felf && ./myapp.felf
+```
+
+**CMake**: pack as part of your build; felf is downloaded at configure time
+([docs/cmake.md](docs/cmake.md)):
+
+```cmake
+include(FELF.cmake)
+add_executable(app main.c)
+felf_pack(app-felf TARGET app LAZY INSTALL_DESTINATION bin)   # app.felf
+```
+
+## How it compares
+
+| | **FELF** | AppImage | Flatpak | Snap | Static linking | Docker |
+|---|---|---|---|---|---|---|
+| Ships as one file | ✅ | ✅ | ❌ | ❌ | ✅ | ❌ |
+| Needs on the host | nothing | FUSE, or extract to `/tmp` | flatpak + runtimes | snapd | nothing | a container runtime |
+| Root to install or run | no | no | no (`--user`) | yes | no | daemon, or a rootless setup |
+| Brings its own libc | ✅ glibc | ❌ the host's: build on the oldest distro | ✅ runtime | ✅ base snap | ✅ | ✅ image |
+| Mounts or extracts at start | nothing | squashfs over FUSE | an installed tree | squashfs loop | nothing | overlayfs |
+| Takes an existing binary | ✅ as is | needs an AppDir | rebuild for the runtime | rebuild | rebuild from source | build an image |
+| Host GPU drivers (GL, Vulkan) | ✅ the host's | ✅ the host's | GL extensions | interfaces | ❌ can't `dlopen` them | passthrough setup |
+| Sandbox | ❌ | ❌ | ✅ | ✅ | ❌ | ✅ |
+
+FELF is a **distribution format, not a sandbox**: it decides which libraries
+a program loads, not which files it can touch. If you need isolation, run a
+FELF inside one.
+
+## Binaries, not a filesystem
 
 FELF carries **BINARIES**: the program, its shared libraries, glibc and
 a locale archive. It does not carry the files a program reads at run time,
@@ -225,23 +309,6 @@ bash, all of coreutils and btop). It feels like a container userland, but
 it's not isolation: add a namespace or a container runtime when you need
 walls.
 
-## How it compares
-
-| | **FELF** | AppImage | Flatpak | Snap | Static linking | Docker |
-|---|---|---|---|---|---|---|
-| Ships as one file | ✅ | ✅ | ❌ | ❌ | ✅ | ❌ |
-| Needs on the host | nothing | FUSE, or extract to `/tmp` | flatpak + runtimes | snapd | nothing | a container runtime |
-| Root to install or run | no | no | no (`--user`) | yes | no | daemon, or a rootless setup |
-| Brings its own libc | ✅ glibc | ❌ the host's: build on the oldest distro | ✅ runtime | ✅ base snap | ✅ | ✅ image |
-| Mounts or extracts at start | nothing | squashfs over FUSE | an installed tree | squashfs loop | nothing | overlayfs |
-| Takes an existing binary | ✅ as is | needs an AppDir | rebuild for the runtime | rebuild | rebuild from source | build an image |
-| Host GPU drivers (GL, Vulkan) | ✅ the host's | ✅ the host's | GL extensions | interfaces | ❌ can't `dlopen` them | passthrough setup |
-| Sandbox | ❌ | ❌ | ✅ | ✅ | ❌ | ✅ |
-
-FELF is a **distribution format, not a sandbox**: it decides which libraries
-a program loads, not which files it can touch. If you need isolation, run a
-FELF inside one.
-
 ## Capabilities
 
 - **Strict by default.** Only bundled libraries, files under the bundle root
@@ -267,26 +334,6 @@ FELF inside one.
 - **UTF-8 everywhere.** Every FELF carries a locale archive, so programs
   start in `C.UTF-8` even in an empty container.
 
-## Get started
-
-**Prebuilt**: the static CLI for x86-64 or aarch64, from the
-[releases](https://github.com/Rucadi/FELF/releases):
-
-```bash
-curl -Lo felf https://github.com/Rucadi/FELF/releases/download/v0.3.0/felf-0.3.0-x86_64-linux
-chmod +x felf
-./felf pack ./myapp -o myapp.felf && ./myapp.felf
-```
-
-**CMake**: pack as part of your build; felf is downloaded at configure time
-([docs/cmake.md](docs/cmake.md)):
-
-```cmake
-include(FELF.cmake)
-add_executable(app main.c)
-felf_pack(app-felf TARGET app LAZY INSTALL_DESTINATION bin)   # app.felf
-```
-
 ## Environment variables
 
 | | |
@@ -300,7 +347,6 @@ felf_pack(app-felf TARGET app LAZY INSTALL_DESTINATION bin)   # app.felf
 Everything else FELF sets is internal handoff, removed before `main()`: the
 program sees the caller's own environment, `LD_*` included
 ([docs/runtime.md](docs/runtime.md#environment-variables)).
-
 
 ## Learn more
 

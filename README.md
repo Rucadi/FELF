@@ -72,6 +72,21 @@ Without flakes, `default.nix` builds the same derivations from the nixpkgs
 revision pinned in `flake.lock`: `nix-build -A felf`, `nix-build -A
 bundle-hello`, `nix-shell -A shells.default`.
 
+### Prebuilt binaries
+
+Each [GitHub release](https://github.com/Rucadi/FELF/releases) carries the
+static `felf` CLI for x86-64 and aarch64, with `SHA256SUMS`; it needs
+nothing on the host:
+
+```bash
+curl -LO https://github.com/Rucadi/FELF/releases/download/v0.1.0/felf-0.1.0-x86_64-linux
+chmod +x felf-0.1.0-x86_64-linux
+./felf-0.1.0-x86_64-linux --version
+```
+
+Releases are built by `.github/workflows/release.yml` when a tag `vX.Y.Z`
+matching `felfVersion` in `nix/default.nix` is pushed.
+
 ### Bundling a normal Nix package
 
 `nix/lib/bundle.nix` turns a normal Nix derivation into a FELF **tree** by

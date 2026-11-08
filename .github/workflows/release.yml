@@ -1,0 +1,97 @@
+# Pushing a tag vX.Y.Z builds the static felf CLI for each architecture and
+# publishes it, with SHA256SUMS, as a GitHub release.  The tag must match
+# felfVersion in nix/default.nix.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to (re)build the release for, e.g. v0.1.0
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.system }}
+    strategy:
+      matrix:
+        include:
+          - system: x86_64-linux
+            runner: ubuntu-24.04
+          - system: aarch64-linux
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 300
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - uses: nix-community/cache-nix-action@v6
+        with:
+          primary-key: nix-${{ matrix.system }}-${{ hashFiles('flake.lock', 'nix/**', 'src/glibc/**') }}
+          restore-prefixes-first-match: nix-${{ matrix.system }}-
+          save: false
+
+      - name: Check version
+        run: |
+          version=$(nix eval --raw .#felf.version)
+          if [ "v$version" != "$TAG" ]; then
+            echo "::error::tag $TAG does not match felfVersion $version"
+            exit 1
+          fi
+
+      - name: Build felf
+        run: nix build -L .#felf -o result-felf
+
+      - name: Package
+        run: |
+          mkdir dist
+          asset="felf-${TAG#v}-${{ matrix.system }}"
+          install -m 755 result-felf/bin/felf "dist/$asset"
+          "dist/$asset" --version
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: felf-${{ matrix.system }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum felf-* > SHA256SUMS && cat SHA256SUMS
+
+      - name: Publish release
+        run: |
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" \
+              --title "FELF $TAG" --generate-notes --verify-tag
+          fi

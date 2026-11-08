@@ -1,0 +1,64 @@
+# Builds the static felf CLI and runs the integration suite on every push
+# and pull request.  The felf binary of each architecture is kept as a
+# workflow artifact.
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.system }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - system: x86_64-linux
+            runner: ubuntu-24.04
+          # aarch64 is built but untested upstream; its checks do not
+          # fail the workflow.
+          - system: aarch64-linux
+            runner: ubuntu-24.04-arm
+            experimental: true
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      # felf-glibc is a full glibc build; keep the store between runs.
+      - uses: nix-community/cache-nix-action@v6
+        with:
+          primary-key: nix-${{ matrix.system }}-${{ hashFiles('flake.lock', 'nix/**', 'src/glibc/**') }}
+          restore-prefixes-first-match: nix-${{ matrix.system }}-
+          gc-max-store-size-linux: 8G
+
+      - name: Build felf
+        run: nix build -L .#felf -o result-felf
+
+      - name: Smoke test
+        run: ./result-felf/bin/felf --version
+
+      - name: Integration tests
+        continue-on-error: ${{ matrix.experimental == true }}
+        run: nix build -L .#felf-tests .#felf-reproducibility .#bundle-hello-test
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: felf-${{ matrix.system }}
+          path: result-felf/bin/felf
+          if-no-files-found: error

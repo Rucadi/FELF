@@ -79,9 +79,9 @@ static `felf` CLI for x86-64 and aarch64, with `SHA256SUMS`; it needs
 nothing on the host:
 
 ```bash
-curl -LO https://github.com/Rucadi/FELF/releases/download/v0.1.0/felf-0.1.0-x86_64-linux
-chmod +x felf-0.1.0-x86_64-linux
-./felf-0.1.0-x86_64-linux --version
+curl -LO https://github.com/Rucadi/FELF/releases/download/v0.2.0/felf-0.2.0-x86_64-linux
+chmod +x felf-0.2.0-x86_64-linux
+./felf-0.2.0-x86_64-linux --version
 ```
 
 Releases are built by `.github/workflows/release.yml` when a tag `vX.Y.Z`

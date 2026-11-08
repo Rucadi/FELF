@@ -23,7 +23,7 @@
 #include <zstd.h>
 
 #ifndef FELF_VERSION_STRING
-#define FELF_VERSION_STRING "0.1.0"
+#define FELF_VERSION_STRING "0.2.0"
 #endif
 
 /* zstd-compress every object at LEVEL, except, with KEEP_LIBRARIES, the

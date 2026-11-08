@@ -15,7 +15,7 @@ let
   inherit (pkgs) lib;
 
   scope = lib.makeScope pkgs.newScope (self: {
-    felfVersion = "0.1.0";
+    felfVersion = "0.2.0";
     felfSource = self.callPackage ./source.nix { };
 
     # The glibc loader: its file name, and where distributions keep it.

@@ -14,7 +14,7 @@ release's `SHA256SUMS`), and every binary it fetches is pinned too:
 set(felf_module "${CMAKE_BINARY_DIR}/FELF.cmake")
 if(NOT EXISTS "${felf_module}")
     file(DOWNLOAD
-        https://github.com/Rucadi/FELF/releases/download/v0.1.0/FELF.cmake
+        https://github.com/Rucadi/FELF/releases/download/v0.2.0/FELF.cmake
         "${felf_module}"
         EXPECTED_HASH SHA256=<FELF.cmake's hash from SHA256SUMS>)
 endif()
@@ -133,7 +133,7 @@ The felf found is the imported target `felf::felf`, and its version is in
 
 ## Limits
 
-- **glibc.**  Programs are packed with FELF's glibc (2.44 for 0.1.0), so
+- **glibc.**  Programs are packed with FELF's glibc (2.44 for 0.2.0), so
   they must be built against that glibc or an older one: any current
   distribution's toolchain works, and `felf pack` rejects a program that
   needs newer symbols.

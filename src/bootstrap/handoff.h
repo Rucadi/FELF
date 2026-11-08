@@ -24,6 +24,13 @@ typedef struct {
 
 int felf_memfd_alloc(const char *name, uint64_t size, int min_fd,
                      char *err, size_t errlen);
+/* The open-file soft limit is raised only when a descriptor the bootstrap
+ * needs is above it: felf_fd_room() makes FD usable (never past the hard
+ * limit), and felf_memfd_alloc() calls it when F_DUPFD finds no room.
+ * felf_restore_fd_limit() puts the caller's limit back before exec and
+ * returns 1, with the limits in FROM and TO, if it had been raised. */
+int felf_fd_room(int fd, char *err, size_t errlen);
+int felf_restore_fd_limit(unsigned long long *from, unsigned long long *to);
 /* Append the jobs that write O's stored bytes into DST (o->size bytes). */
 int felf_fill_jobs_add(const felf_db_object_t *o, const uint8_t *stored,
                        uint8_t *dst, felf_fill_job_t **jobs, size_t *count,

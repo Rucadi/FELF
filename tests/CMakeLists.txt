@@ -695,7 +695,8 @@ set_tests_properties(run/concurrent PROPERTIES
 # --------------------------------------------------------------------------
 # Open-file limit: object descriptors start at 1000, and containers often
 # have a soft limit of 1024.  The bootstrap raises the soft limit for itself
-# and the application sees the caller's limit again.
+# only when a descriptor it needs is above it, and the application sees the
+# caller's limit again.
 
 felf_add_script_test(run/open-file-limit file-limit.cmake
     -DFELF=${felf_cli}

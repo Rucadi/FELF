@@ -22,9 +22,11 @@ binary.  It:
 4. **Finds the bundle root**: when the file sits at a program's recorded
    place in a tree (a copy of the FELF there), the root follows from that;
    otherwise from the stored root, relative to the file.
-5. **Raises the soft open-file limit** if the objects need more
-   descriptors than it allows, and restores the caller's value before the
-   exec.
+5. **Raises the soft open-file limit only when needed**: when a
+   descriptor it must use (998, 999, or a memfd from 1000 up) is above the
+   soft limit, it raises the limit just past it, and restores the caller's
+   value before the exec.  Libraries mapped from the file take no
+   descriptor, so the common soft limit of 1024 is rarely raised.
 6. **Materializes objects**: every object that needs a file of its own (the
    program, the loader, the audit module, the shim, the locale archive, and
    libraries that are compressed) becomes a memfd, at

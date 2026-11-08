@@ -6,6 +6,7 @@
 #include <elf.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <pthread.h>
 #include <stdarg.h>
 #include <stdint.h>
@@ -13,6 +14,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <sys/resource.h>
 #include <sys/syscall.h>
 #include <unistd.h>
 #include <zstd.h>
@@ -24,6 +26,48 @@
 #ifndef MFD_CLOEXEC
 #define MFD_CLOEXEC 0x0001U
 #endif
+
+/* The caller's open-file limit, saved the first time it is raised. */
+static struct rlimit caller_nofile;
+static rlim_t raised_nofile;
+
+int felf_fd_room(int fd, char *err, size_t errlen)
+{
+    struct rlimit rl;
+    if (getrlimit(RLIMIT_NOFILE, &rl) != 0 || rl.rlim_cur == RLIM_INFINITY ||
+        (rlim_t)fd < rl.rlim_cur)
+        return 0;
+    rlim_t need = (rlim_t)fd + 1;
+    if (rl.rlim_max != RLIM_INFINITY && rl.rlim_max < need) {
+        felf_set_error(err, errlen,
+                       "open-file limit too low: descriptor %d is needed, "
+                       "hard limit is %llu (raise ulimit -Hn)", fd,
+                       (unsigned long long)rl.rlim_max);
+        return -1;
+    }
+    if (raised_nofile == 0)
+        caller_nofile = rl;
+    rl.rlim_cur = need;
+    if (setrlimit(RLIMIT_NOFILE, &rl) != 0) {
+        felf_set_error(err, errlen,
+                       "cannot raise the open-file limit to %llu: %s",
+                       (unsigned long long)need, strerror(errno));
+        return -1;
+    }
+    raised_nofile = need;
+    return 0;
+}
+
+int felf_restore_fd_limit(unsigned long long *from, unsigned long long *to)
+{
+    if (raised_nofile == 0)
+        return 0;
+    /* Descriptors already open stay valid above the restored limit. */
+    setrlimit(RLIMIT_NOFILE, &caller_nofile);
+    *from = (unsigned long long)caller_nofile.rlim_cur;
+    *to = (unsigned long long)raised_nofile;
+    return 1;
+}
 
 int felf_memfd_alloc(const char *name, uint64_t size, int min_fd,
                      char *err, size_t errlen)
@@ -45,7 +89,24 @@ int felf_memfd_alloc(const char *name, uint64_t size, int min_fd,
         close(fd);
         return -1;
     }
-    int high = fcntl(fd, F_DUPFD, min_fd);
+    /* F_DUPFD fails with EINVAL when MIN_FD is not below the soft limit,
+     * and with EMFILE when nothing from MIN_FD up is free below it: only
+     * then is the limit raised, one descriptor at a time. */
+    int high;
+    while ((high = fcntl(fd, F_DUPFD, min_fd)) < 0 &&
+           (errno == EINVAL || errno == EMFILE)) {
+        struct rlimit rl;
+        if (getrlimit(RLIMIT_NOFILE, &rl) != 0 ||
+            rl.rlim_cur == RLIM_INFINITY || rl.rlim_cur > INT_MAX)
+            break;
+        int next = (rlim_t)min_fd > rl.rlim_cur ? min_fd : (int)rl.rlim_cur;
+        if (felf_fd_room(next, err, errlen) != 0) {
+            close(fd);
+            return -1;
+        }
+        if (raised_nofile != (rlim_t)next + 1)
+            break; /* not raised: report the F_DUPFD error */
+    }
     if (high < 0)
         felf_set_error(err, errlen, "cannot duplicate memfd: %s",
                        strerror(errno));

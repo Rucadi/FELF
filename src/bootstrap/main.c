@@ -529,43 +529,20 @@ int main(int argc, char **argv, char **envp)
     debug("app=%s root=%s strict=%d lazy=%d objects=%zu", self, root,
           strict, lazy, db.object_count);
 
-    /* Every object descriptor is >= FELF_FD_BASE, so the soft open-file
-     * limit must reach FELF_FD_BASE + objects.  Containers commonly start
-     * with a soft limit of 1024.  Raise only the soft limit, only as far as
-     * needed, and restore the caller's value before exec: descriptors that
-     * are already open stay valid above the limit, so the application sees
-     * the limit it was started with. */
-    struct rlimit caller_nofile;
-    int restore_nofile = 0;
-    if (getrlimit(RLIMIT_NOFILE, &caller_nofile) == 0) {
-        rlim_t need = (rlim_t)FELF_FD_BASE + db.object_count + 16;
-        if (caller_nofile.rlim_cur != RLIM_INFINITY &&
-            caller_nofile.rlim_cur < need) {
-            if (caller_nofile.rlim_max != RLIM_INFINITY &&
-                caller_nofile.rlim_max < need) {
-                fail("open-file limit too low: %zu objects need %llu "
-                     "descriptors, hard limit is %llu (raise ulimit -Hn)",
-                     db.object_count, (unsigned long long)need,
-                     (unsigned long long)caller_nofile.rlim_max);
-                goto out;
-            }
-            struct rlimit raised = caller_nofile;
-            raised.rlim_cur = need;
-            if (setrlimit(RLIMIT_NOFILE, &raised) != 0) {
-                fail("cannot raise the open-file limit to %llu: %s",
-                     (unsigned long long)need, strerror(errno));
-                goto out;
-            }
-            restore_nofile = 1;
-            debug("raised open-file soft limit %llu -> %llu for exec",
-                  (unsigned long long)caller_nofile.rlim_cur,
-                  (unsigned long long)need);
-        }
-    }
+    /* Every object descriptor is >= FELF_FD_BASE, and 998 and 999 are
+     * fixed.  Containers commonly start with a soft open-file limit of
+     * 1024, enough unless many objects become memfds: the soft limit is
+     * raised only for a descriptor above it (felf_fd_room, also called by
+     * felf_memfd_alloc), and the caller's value is restored before exec, so
+     * the application sees the limit it was started with. */
 
     /* Reserve the audit-index descriptor so F_DUPFD cannot hand it out.
      * The real index replaces this placeholder below. */
     if (audit != NULL) {
+        if (felf_fd_room(FELF_AUDIT_INDEX_FD, err, sizeof(err)) != 0) {
+            fail("%s", err);
+            goto out;
+        }
         int reserve = open("/dev/null", O_RDONLY | O_CLOEXEC);
         if (reserve >= 0) {
             if (dup2(reserve, FELF_AUDIT_INDEX_FD) >= 0)
@@ -681,6 +658,10 @@ int main(int argc, char **argv, char **envp)
         /* The loader opens /proc/self/fd/FELF_CONTAINER_FD for each mapped
          * library; the runtime shim makes it close-on-exec.  dup2() leaves
          * the copy open across exec; FD itself is close-on-exec. */
+        if (felf_fd_room(FELF_CONTAINER_FD, err, sizeof(err)) != 0) {
+            fail("%s", err);
+            goto out;
+        }
         if (dup2(fd, FELF_CONTAINER_FD) < 0) {
             fail("cannot keep %s open for its loader: %s", self,
                  strerror(errno));
@@ -757,8 +738,10 @@ int main(int argc, char **argv, char **envp)
      * kernel and the private loader. */
     felf_db_close(&db);
 
-    if (restore_nofile)
-        setrlimit(RLIMIT_NOFILE, &caller_nofile);
+    unsigned long long nofile_from, nofile_to;
+    if (felf_restore_fd_limit(&nofile_from, &nofile_to))
+        debug("raised open-file soft limit %llu -> %llu, restored for exec",
+              nofile_from, nofile_to);
     syscall(SYS_execveat, program_fd, "", argv, new_env, AT_EMPTY_PATH);
     int saved = errno;
     /* Fallback for kernels without execveat: /proc/self/fd/<program> is a

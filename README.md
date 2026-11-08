@@ -4,6 +4,32 @@
 architecture: no FUSE, no root, no runtime to install, nothing extracted to
 disk.**
 
+## Why
+
+You built a program. You want to hand it to someone and have it **just
+work**. On Linux, that's surprisingly hard:
+
+- **Copy the binary**, and you get `version 'GLIBC_2.38' not found` or a
+  missing `libfoo.so.3`. A dynamic binary only runs where its exact
+  libraries are.
+- **Link it statically**, and glibc fights you: NSS, locales, iconv and
+  `dlopen` want shared libraries. C++ and Qt stacks become a project of
+  their own, GPU drivers can't be linked in at all, and you rebuild every
+  dependency from source.
+- **Build it with Nix**, and it's reproducible, but it lives in
+  `/nix/store`: the other machine needs Nix, or the whole closure at the
+  same paths.
+- **Ship an AppImage**, and it mounts itself over FUSE, which containers
+  and locked-down machines rarely allow; the fallback extracts to `/tmp`.
+  It also runs on the host's glibc, so you build on the oldest distribution
+  you support.
+- **Ship a Flatpak or a Snap**, and the user first needs flatpak or snapd
+  and a runtime that can weigh hundreds of MB.
+- **Ship a Docker image**, and it needs a container runtime. It's an image,
+  not a program.
+
+FELF takes the binary you already have and makes it run on any Linux:
+
 ```console
 $ felf pack $(which git) -o git
 wrote git
@@ -13,11 +39,43 @@ $ env -i ./git --version          # no PATH, no locale, no LD_* — still works
 git version 2.56.0
 ```
 
-FELF takes an ordinary dynamically linked program, as you already build it,
-and packs it with every shared library it needs, a private glibc and dynamic
-linker, and a read-only SQLite index into **one file that is still a valid
-ELF executable**. Copy it to another distribution, an older one, or an empty
+No need to rebuild nor having a special toolchain: the program is packed with every shared
+library it needs, a private glibc and dynamic linker, and a read-only
+SQLite index into **one file that is still a valid ELF executable**. Copy it to another distribution, an older one, or an empty
 container, and the kernel runs it like any other binary.
+
+### Binaries, not a filesystem
+
+FELF carries **BINARIES**: the program, its shared libraries, glibc and
+a locale archive. It does not carry the files a program reads at run time,
+such as configuration, data, fonts, icons or CA certificates.
+
+A program that needs nothing but itself ships as **the FELF alone**. One
+that needs its own files ships as **a `.tar.gz`: the FELF plus those files
+next to it**:
+
+```text
+myapp.tar.gz
+└── myapp/
+    ├── bin/myapp        the FELF: program, libraries, glibc
+    └── share/myapp/     its data and configuration
+```
+
+```bash
+mkdir -p dist/myapp/bin dist/myapp/share/myapp
+felf pack ./myapp --root .. --env 'MYAPP_DATA=$FELF_ROOT/share/myapp' \
+    -o dist/myapp/bin/myapp
+cp -r data/. dist/myapp/share/myapp/
+tar -czf myapp.tar.gz -C dist myapp
+# on any machine:
+tar -xzf myapp.tar.gz && ./myapp/bin/myapp
+```
+
+The tree can be unpacked anywhere: the FELF finds its root from its own
+location at every start, and `/proc/self/exe` names the FELF, so programs
+that look next to their executable find their files too. Files the program
+expects from the system itself (`/etc/fonts`, CA certificates) still come
+from the host, and paths compiled into the program are not redirected
 
 ## What's inside
 

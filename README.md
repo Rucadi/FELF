@@ -269,7 +269,7 @@ FELF inside one.
 [releases](https://github.com/Rucadi/FELF/releases):
 
 ```bash
-curl -Lo felf https://github.com/Rucadi/FELF/releases/download/v0.2.0/felf-0.2.0-x86_64-linux
+curl -Lo felf https://github.com/Rucadi/FELF/releases/download/v0.3.0/felf-0.3.0-x86_64-linux
 chmod +x felf
 ./felf pack ./myapp -o myapp.felf && ./myapp.felf
 ```

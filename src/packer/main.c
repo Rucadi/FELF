@@ -14,7 +14,7 @@
 #include <unistd.h>
 
 #ifndef FELF_VERSION_STRING
-#define FELF_VERSION_STRING "0.2.0"
+#define FELF_VERSION_STRING "0.3.0"
 #endif
 
 /* zstd level used unless --compress says otherwise. */

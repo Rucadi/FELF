@@ -22,7 +22,7 @@ Pin the module's hash and the binary it downloads is pinned too:
 set(felf_module "${CMAKE_BINARY_DIR}/FELF.cmake")
 if(NOT EXISTS "${felf_module}")
     file(DOWNLOAD
-        https://github.com/Rucadi/FELF/releases/download/v0.2.0/FELF.cmake
+        https://github.com/Rucadi/FELF/releases/download/v0.3.0/FELF.cmake
         "${felf_module}"
         EXPECTED_HASH SHA256=<FELF.cmake's hash from SHA256SUMS>)
 endif()

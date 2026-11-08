@@ -38,7 +38,7 @@ endif()
 # The release this file belongs to.  The release workflow fills in the
 # checksums of its binaries; a copy taken from the source tree has none and
 # reads SHA256SUMS from the release instead.
-set(_FELF_MODULE_VERSION "0.2.0")
+set(_FELF_MODULE_VERSION "0.3.0")
 set(_FELF_SHA256_x86_64 "")
 set(_FELF_SHA256_aarch64 "")
 

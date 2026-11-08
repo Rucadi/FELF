@@ -13,7 +13,7 @@ let
   inherit (pkgs) lib;
 
   scope = lib.makeScope pkgs.newScope (self: {
-    felfVersion = "0.2.0";
+    felfVersion = "0.3.0";
     felfSource = self.callPackage ./source.nix { };
 
     # The glibc loader's file name.

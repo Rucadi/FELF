@@ -1,0 +1,30 @@
+diff --git a/elf/rtld.c b/elf/rtld.c
+index fc053df..3e3668b 100644
+--- a/elf/rtld.c
++++ b/elf/rtld.c
+@@ -1834,7 +1834,9 @@ dl_main (const ElfW(Phdr) *phdr,
+      open().  So we do this first.  If it succeeds we do almost twice
+      the work but this does not matter, since it is not for production
+      use.  */
+-  static const char preload_file[] = "/etc/ld.so.preload";
++  /* FELF: the host's /etc/ld.so.preload must not inject host libraries
++     into a FELF; FELF's audit module and shim decide what is loaded.  */
++  static const char preload_file[] = "/etc/ld-felf.so.preload";
+   if (__glibc_unlikely (__access (preload_file, R_OK) == 0))
+     {
+       /* Read the contents of the file.  */
+diff --git a/sysdeps/generic/dl-cache.h b/sysdeps/generic/dl-cache.h
+index 972ab32..68923a9 100644
+--- a/sysdeps/generic/dl-cache.h
++++ b/sysdeps/generic/dl-cache.h
+@@ -35,7 +35,9 @@
+ #endif
+ 
+ #ifndef LD_SO_CACHE
+-# define LD_SO_CACHE SYSCONFDIR "/ld.so.cache"
++/* FELF: the loader never reads the host's ld.so.cache: FELF's audit
++   module resolves host libraries itself (src/loader/felf_audit.c).  */
++# define LD_SO_CACHE SYSCONFDIR "/ld-felf.so.cache"
+ #endif
+ 
+ #ifndef add_system_dir

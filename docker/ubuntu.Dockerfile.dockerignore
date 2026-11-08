@@ -1,0 +1,6 @@
+# Only what the CMake build reads (nix/source.nix lists the same).
+*
+!CMakeLists.txt
+!src
+!tests
+!third_party

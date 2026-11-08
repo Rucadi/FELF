@@ -1,0 +1,231 @@
+diff --git a/elf/dl-load.c b/elf/dl-load.c
+index 47147864..9f2a796c 100644
+--- a/elf/dl-load.c
++++ b/elf/dl-load.c
+@@ -925,11 +925,12 @@ _dl_notify_new_object (int mode, Lmid_t nsid, struct link_map *l)
+ static void
+ _dl_pt_load_iterator_init (struct dl_pt_load_iterator *it, int fd,
+ 			   struct filebuf *fbp, ElfW(Off) phoff,
+-			   uint16_t phnum)
++			   uint16_t phnum, ElfW(Off) file_offset)
+ {
+   it->fd = fd;
+   it->fbp = fbp;
+   it->phoff = phoff;
++  it->file_offset = file_offset;
+   it->phnum = phnum;
+   it->idx = 0;
+   it->pagesize = GLRO (dl_pagesize);
+@@ -1087,7 +1088,8 @@ struct link_map *
+ _dl_map_object_from_fd (const char *name, const char *origname, int fd,
+ 			struct filebuf *fbp, char *realname,
+ 			struct link_map *loader, int l_type, int mode,
+-			const void *stack_endp, Lmid_t nsid)
++			const void *stack_endp, Lmid_t nsid,
++			ElfW(Off) felf_offset)
+ {
+   struct link_map *l = NULL;
+   ElfW(Ehdr) header;
+@@ -1137,6 +1139,14 @@ _dl_map_object_from_fd (const char *name, const char *origname, int fd,
+ 	  _dl_signal_error (errval, name, NULL, errstring);
+ 	}
+ 
++      /* FELF: every object in a FELF file has the file's device and
++	 inode; tell them apart by their offset.  No file has device -1.  */
++      if (felf_offset != 0)
++	{
++	  id.dev = (dev_t) -1;
++	  id.ino = felf_offset;
++	}
++
+       /* Look again to see if the real name matched another already loaded.  */
+       for (l = GL(dl_ns)[nsid]._ns_loaded; l != NULL; l = l->l_next)
+ 	if (!l->l_removed && _dl_file_id_match_p (&l->l_file_id, &id))
+@@ -1234,7 +1244,8 @@ _dl_map_object_from_fd (const char *name, const char *origname, int fd,
+     bool has_holes;
+     bool empty_dynamic = false;
+ 
+-    _dl_pt_load_iterator_init (&it, fd, fbp, header.e_phoff, l->l_phnum);
++    _dl_pt_load_iterator_init (&it, fd, fbp, header.e_phoff, l->l_phnum,
++			       felf_offset);
+     has_holes = false;
+ 
+     errstring = _dl_map_object_scan_phdrs (&it, l, mode, &stack_flags,
+@@ -1317,7 +1328,8 @@ _dl_map_object_from_fd (const char *name, const char *origname, int fd,
+ 	  goto lose_errno;
+ 	}
+       if ((size_t) __pread64_nocancel (fd, newp, phdr_size,
+-				       header.e_phoff) != phdr_size)
++				       felf_offset + header.e_phoff)
++	  != phdr_size)
+ 	{
+ 	  free (newp);
+ 	  errstring = N_("cannot read file data");
+@@ -1937,6 +1949,74 @@ _dl_lookup_map (Lmid_t nsid, const char *name)
+   return NULL;
+ }
+ 
++#ifdef SHARED
++/* FELF ("fat ELF") executables carry their shared objects inside the file,
++   some of them uncompressed and page-aligned.  FELF's audit module answers
++   a lookup for such an object with FELF_MAP_PREFIX followed by its offset
++   in hexadecimal, and the object is mapped straight from the FELF file,
++   which FELF's bootstrap leaves open on descriptor 999.  The FELF packer
++   looks for FELF_MAP_PREFIX to know that a loader can do this.  */
++# define FELF_MAP_PREFIX "felf-map-1:"
++# define FELF_FILE "/proc/self/fd/999"
++
++/* Map the object TOKEN refers to, requested as NAME.  */
++static struct link_map *
++felf_map_object (struct link_map *loader, const char *name,
++		 const char *token, int type, int mode, Lmid_t nsid)
++{
++  ElfW(Off) offset = 0;
++  const char *p = token + sizeof (FELF_MAP_PREFIX) - 1;
++  int digits = 0;
++  for (; *p != '\0'; ++p, ++digits)
++    {
++      unsigned int d;
++      if (*p >= '0' && *p <= '9')
++	d = *p - '0';
++      else if (*p >= 'a' && *p <= 'f')
++	d = *p - 'a' + 10;
++      else
++	break;
++      offset = offset * 16 + d;
++    }
++  if (*p != '\0' || digits == 0 || digits > 16 || offset == 0
++      || (offset & (GLRO(dl_pagesize) - 1)) != 0)
++    _dl_signal_error (0, name, NULL, N_("invalid FELF object reference"));
++
++  int fd = __open64_nocancel (FELF_FILE, O_RDONLY | O_CLOEXEC);
++  if (fd == -1)
++    _dl_signal_error (errno, name, NULL, N_("cannot open the FELF file"));
++
++  struct filebuf fb;
++  ssize_t n = __pread64_nocancel (fd, fb.buf, sizeof (fb.buf), offset);
++  const ElfW(Ehdr) *ehdr = (const ElfW(Ehdr) *) fb.buf;
++  if (n < (ssize_t) sizeof (ElfW(Ehdr))
++      || memcmp (ehdr->e_ident, ELFMAG, SELFMAG) != 0
++      || ehdr->e_ident[EI_CLASS] != ELFW(CLASS)
++      || ehdr->e_phentsize != sizeof (ElfW(Phdr))
++      || !elf_machine_matches_host (ehdr))
++    {
++      __close_nocancel (fd);
++      _dl_signal_error (0, name, NULL,
++			N_("invalid ELF object in the FELF file"));
++    }
++  fb.len = n;
++
++  char *realname = __strdup (name);
++  if (realname == NULL)
++    {
++      __close_nocancel (fd);
++      _dl_signal_error (ENOMEM, name, NULL,
++			N_("cannot create shared object descriptor"));
++    }
++  /* As in _dl_map_new_object: a dlopen'ed object is its own loader, so its
++     local scope is its own search list.  */
++  if (mode & __RTLD_CALLMAP)
++    loader = NULL;
++  return _dl_map_object_from_fd (name, NULL, fd, &fb, realname, loader,
++				 type, mode, __libc_stack_end, nsid, offset);
++}
++#endif
++
+ /* Map in the shared object file NAME.  */
+ 
+ struct link_map *
+@@ -1976,6 +2056,10 @@ _dl_map_new_object (struct link_map *loader, const char *name,
+       if (before != name && strcmp (before, name) != 0)
+ 	origname = before;
+     }
++
++  if (strncmp (name, FELF_MAP_PREFIX, sizeof (FELF_MAP_PREFIX) - 1) == 0)
++    return felf_map_object (loader, origname != NULL ? origname : name,
++			    name, type, mode, nsid);
+ #endif
+ 
+   if (strchr (name, '/') == NULL)
+@@ -2197,7 +2281,7 @@ _dl_map_new_object (struct link_map *loader, const char *name,
+ 
+   void *stack_end = __libc_stack_end;
+   return _dl_map_object_from_fd (name, origname, fd, &fb, realname, loader,
+-				 type, mode, stack_end, nsid);
++				 type, mode, stack_end, nsid, 0);
+ }
+ 
+ struct link_map *
+diff --git a/elf/dl-load.h b/elf/dl-load.h
+index 84b82e18..f8b41446 100644
+--- a/elf/dl-load.h
++++ b/elf/dl-load.h
+@@ -109,6 +109,9 @@ struct loadcmd
+ {
+   ElfW(Addr) mapstart, mapend, dataend, allocend, mapalign;
+   ElfW(Off) mapoff;
++  ElfW(Off) file_offset;                /* FELF: where the ELF image starts
++                                           in the file; add to mapoff for
++                                           mmap.  */
+   int prot;                             /* PROT_* bits.  */
+ };
+ 
+@@ -125,7 +128,8 @@ struct dl_pt_load_iterator
+   int fd;                       /* File descriptor for pread.  */
+   struct filebuf *fbp;          /* Scratch buffer for batched phdr reads.  */
+   ElfW(Off) phoff;              /* Program header table file offset.  */
+-  ElfW(Half) phnum;             /* Total number of program headers.  */
++  ElfW(Off) file_offset;        /* FELF: start of the ELF image in FD.  */
++  ElfW(Half) phnum;            /* Total number of program headers.  */
+   ElfW(Half) idx;               /* Index of next header to read.  */
+   ElfW(Half) buf_base;          /* Index of phdr at start of fbp->buf
+                                    (chunked mode only).  */
+@@ -163,7 +167,8 @@ _dl_pt_load_iterator_phdr_at (struct dl_pt_load_iterator *it, ElfW(Half) idx)
+       if (batch > phdrs_per_buf)
+ 	batch = phdrs_per_buf;
+       size_t bytes = (size_t) batch * sizeof (ElfW(Phdr));
+-      ElfW(Off) off = it->phoff + (ElfW(Off)) idx * sizeof (ElfW(Phdr));
++      ElfW(Off) off = it->file_offset + it->phoff
++		      + (ElfW(Off)) idx * sizeof (ElfW(Phdr));
+       if (__pread64_nocancel (it->fd, it->fbp->buf, bytes, off)
+ 	  != (ssize_t) bytes)
+ 	return NULL;
+@@ -194,6 +199,7 @@ _dl_pt_load_iterator_next (struct dl_pt_load_iterator *it, struct loadcmd *c)
+       c->dataend  = ph->p_vaddr + ph->p_filesz;
+       c->allocend = ph->p_vaddr + ph->p_memsz;
+       c->mapoff   = ALIGN_DOWN (ph->p_offset, it->pagesize);
++      c->file_offset = it->file_offset;
+       c->prot     = pf_to_prot (ph->p_flags);
+       c->mapalign = it->p_align_max;
+       return true;
+diff --git a/elf/dl-map-segments.h b/elf/dl-map-segments.h
+index 1854fab7..8f639149 100644
+--- a/elf/dl-map-segments.h
++++ b/elf/dl-map-segments.h
+@@ -28,7 +28,7 @@ _dl_map_segment (const struct loadcmd *c, ElfW(Addr) mappref,
+ {
+   if (__glibc_likely (c->mapalign <= GLRO(dl_pagesize)))
+     return (ElfW(Addr)) __mmap ((void *) mappref, maplength, c->prot,
+-				MAP_COPY|MAP_FILE, fd, c->mapoff);
++				MAP_COPY|MAP_FILE, fd, c->mapoff + c->file_offset);
+ 
+   /* If the segment alignment > the page size, allocate enough space to
+      ensure that the segment can be properly aligned.  */
+@@ -46,7 +46,7 @@ _dl_map_segment (const struct loadcmd *c, ElfW(Addr) mappref,
+   map_start_aligned = (ElfW(Addr)) __mmap ((void *) map_start_aligned,
+ 					   maplength, c->prot,
+ 					   MAP_COPY|MAP_FILE|MAP_FIXED,
+-					   fd, c->mapoff);
++					   fd, c->mapoff + c->file_offset);
+   if (__glibc_unlikely ((void *) map_start_aligned == MAP_FAILED))
+     __munmap ((void *) map_start, maplen);
+   else
+@@ -142,7 +142,7 @@ _dl_map_segments (struct link_map *l, int fd,
+           && (__mmap ((void *) (l->l_addr + c.mapstart),
+                       c.mapend - c.mapstart, c.prot,
+                       MAP_FIXED|MAP_COPY|MAP_FILE,
+-                      fd, c.mapoff)
++                      fd, c.mapoff + c.file_offset)
+               == MAP_FAILED))
+         return DL_MAP_SEGMENTS_ERROR_MAP_SEGMENT;
+ 

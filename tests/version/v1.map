@@ -1,0 +1,4 @@
+VER_1 {
+    global: v;
+    local: *;
+};

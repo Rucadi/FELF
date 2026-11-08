@@ -1,0 +1,52 @@
+diff --git a/locale/loadarchive.c b/locale/loadarchive.c
+index 01c99b0..7eee4fb 100644
+--- a/locale/loadarchive.c
++++ b/locale/loadarchive.c
+@@ -44,6 +44,28 @@
+ /* Name of the locale archive file.  */
+ static const char archfname[] = COMPLOCALEDIR "/locale-archive";
+ 
++/* FELF: the bootstrap names the locale archive the FELF carries in
++   LOCALE_ARCHIVE (a caller's LOCALE_ARCHIVE_2_27 wins), since this glibc
++   has no locale location of its own on the host.  Both are ignored in
++   secure mode.  */
++static int
++open_locale_archive (void)
++{
++  static const char *const vars[] = { "LOCALE_ARCHIVE_2_27",
++				      "LOCALE_ARCHIVE" };
++  for (size_t i = 0; i < sizeof vars / sizeof vars[0]; i++)
++    {
++      const char *path = __libc_secure_getenv (vars[i]);
++      if (path != NULL && path[0] != '\0')
++	{
++	  int fd = __open_nocancel (path, O_RDONLY | O_LARGEFILE | O_CLOEXEC);
++	  if (fd >= 0)
++	    return fd;
++	}
++    }
++  return __open_nocancel (archfname, O_RDONLY | O_LARGEFILE | O_CLOEXEC);
++}
++
+ /* Size of initial mapping window, optimal if large enough to
+    cover the header plus the initial locale.  */
+ #define ARCHIVE_MAPPING_WINDOW	(2 * 1024 * 1024)
+@@ -202,7 +224,7 @@ _nl_load_locale_from_archive (int category, const char **namep)
+       archmapped = &headmap;
+ 
+       /* The archive has never been opened.  */
+-      fd = __open_nocancel (archfname, O_RDONLY|O_LARGEFILE|O_CLOEXEC);
++      fd = open_locale_archive ();
+       if (fd < 0)
+ 	/* Cannot open the archive, for whatever reason.  */
+ 	return NULL;
+@@ -397,8 +419,7 @@ _nl_load_locale_from_archive (int category, const char **namep)
+ 	  if (fd == -1)
+ 	    {
+ 	      struct __stat64_t64 st;
+-	      fd = __open_nocancel (archfname,
+-				    O_RDONLY|O_LARGEFILE|O_CLOEXEC);
++	      fd = open_locale_archive ();
+ 	      if (fd == -1)
+ 		/* Cannot open the archive, for whatever reason.  */
+ 		return NULL;

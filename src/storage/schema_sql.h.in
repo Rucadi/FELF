@@ -1,0 +1,4 @@
+/* Generated from src/storage/schema.sql by CMake. */
+static const char *const FELF_SCHEMA_SQL = R"FELF_SQL(
+@FELF_SCHEMA_SQL@
+)FELF_SQL";

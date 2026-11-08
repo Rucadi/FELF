@@ -316,3 +316,12 @@ Apache 2.0 ([LICENSE](LICENSE)). Every FELF embeds glibc, which is LGPL:
 when you redistribute FELFs, its license and source-availability terms
 apply to that part, FELF's loader patch included
 ([src/glibc/patches](src/glibc/patches)).
+
+## AI disclosure
+
+FELF's architecture (a static bootstrap, a private glibc, and a loader that
+maps libraries straight out of the file) was planned years ago, out of
+frustration with shared libraries and with binaries that only run on the
+machine that built them. The project itself, its code, tests and
+documentation, was built with [Claude](https://claude.ai), Anthropic's AI
+model, directed by the author.

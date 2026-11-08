@@ -4,12 +4,11 @@
 #   nix-build -A felf
 #   nix-build -A oci-coreutils-bash
 #   nix-build -A checks.felf-tests
-#   nix-build -E '(import ./. { }).bundler (import <nixpkgs> { }).hello'
 #   nix-shell                  # shell.nix selects the development shell
 #   nix-shell -A shells.default
 #
-# Every package of the flake is a top-level attribute; checks, the bundle
-# and tarball helpers, and the shell are under their own names.
+# Every package of the flake is a top-level attribute; checks and the
+# shell are under their own names.
 {
   system ? builtins.currentSystem,
   pkgs ? import (
@@ -27,7 +26,7 @@ let
   felf = import ./nix { inherit pkgs; };
 in
 felf.packages // {
-  inherit (felf) checks bundle tarball bundler;
+  inherit (felf) checks;
   # Not a top-level derivation: plain nix-build must not try to build it.
   shells.default = felf.shell;
 }

@@ -42,7 +42,7 @@ ctest --test-dir build/host -j 8               # parallel
 | `tools/mangle.c` | Damages a FELF deterministically for the corruption tests |
 | `cmake/TestUtils.cmake` | Assertions shared by the script tests |
 | `cmake/*.cmake` | One CTest test per multi-step scenario |
-| `docker/` | Manual cross-distribution checks for the Nix bundles |
+| `docker/` | Manual cross-distribution check: `run.sh` packs FELFs and runs them in stock Debian and Ubuntu containers |
 
 ## Fixtures
 

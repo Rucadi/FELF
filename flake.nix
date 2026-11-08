@@ -13,12 +13,6 @@
     in {
       packages = forAllSystems (felf: felf.packages);
       checks = forAllSystems (felf: felf.checks);
-      lib = forAllSystems (felf: { inherit (felf) bundle tarball; });
-      # nix bundle --bundler .#felf INSTALLABLE (or .# for the default).
-      bundlers = forAllSystems (felf: {
-        default = felf.bundler;
-        felf = felf.bundler;
-      });
       devShells = forAllSystems (felf: { default = felf.shell; });
     };
 }

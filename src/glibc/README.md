@@ -72,4 +72,4 @@ from its one patched build.
 Porting to another glibc: apply it to that glibc's source with nixpkgs'
 patches applied, fix what does not apply in `elf/dl-load.c`,
 `elf/dl-load.h` and `elf/dl-map-segments.h`, and run `nix build
-.#felf-tests .#bundle-hello-test`.
+.#felf-tests`.

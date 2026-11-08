@@ -55,7 +55,7 @@ jobs:
 
       - name: Integration tests
         continue-on-error: ${{ matrix.experimental == true }}
-        run: nix build -L .#felf-tests .#felf-reproducibility .#bundle-hello-test
+        run: nix build -L .#felf-tests .#felf-reproducibility
 
       # cmake/FELF.cmake in a project that does not use Nix, with the
       # runner's own compiler and glibc.

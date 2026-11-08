@@ -730,7 +730,8 @@ felf_add_output_test(locale/default-lang locale "lang=C\\.UTF-8" ${felf_env}
 set_tests_properties(locale/default-lang PROPERTIES LABELS "locale")
 
 felf_add_output_test(locale/archive-descriptor locale
-    "LOCALE_ARCHIVE=/proc/self/fd/" ${felf_env}
+    "LOCALE_ARCHIVE=/proc/self/fd/[0-9]+ \\(embedded: the caller set no locale\\)"
+    ${felf_env}
     -u LANG -u LANGUAGE -u LC_ALL -u LC_CTYPE -u LC_NUMERIC -u LC_TIME
     -u LC_COLLATE -u LC_MONETARY -u LC_MESSAGES -u LC_PAPER -u LC_NAME
     -u LC_ADDRESS -u LC_TELEPHONE -u LC_MEASUREMENT -u LC_IDENTIFICATION
@@ -762,9 +763,11 @@ felf_add_output_test(locale/caller-archive locale "archive=/caller/archive"
     "${FELF_TEST_WORK}/locale.felf")
 set_tests_properties(locale/caller-archive PROPERTIES LABELS "locale")
 
-# An archive that will not be used is not decompressed into a memfd.
+# The caller's archive is kept: the embedded one is not decompressed into
+# a memfd, and FELF_DEBUG names the one in use.
 felf_add_output_test(locale/embedded-skipped locale
-    "embedded locale-archive not needed" ${felf_env}
+    "LOCALE_ARCHIVE=/caller/archive \\(caller's, kept\\)"
+    ${felf_env}
     -u LOCALE_ARCHIVE_2_27 LOCALE_ARCHIVE=/caller/archive
     FELF_DEBUG=1 "${FELF_TEST_WORK}/locale.felf")
 set_tests_properties(locale/embedded-skipped PROPERTIES LABELS "locale")
@@ -776,6 +779,13 @@ felf_add_output_test(locale/explicit-c locale "lang=\\(unset\\)"
     -u LOCALE_ARCHIVE -u LOCALE_ARCHIVE_2_27 LC_ALL=C
     "${FELF_TEST_WORK}/locale.felf" default)
 set_tests_properties(locale/explicit-c PROPERTIES LABELS "locale")
+
+felf_add_output_test(locale/explicit-c-debug locale
+    "LOCALE_ARCHIVE=/proc/self/fd/[0-9]+ \\(embedded: the caller's locale is C\\)"
+    ${felf_env} -u LANG -u LANGUAGE -u LC_CTYPE -u LOCALE_ARCHIVE
+    -u LOCALE_ARCHIVE_2_27 LC_ALL=C FELF_DEBUG=1
+    "${FELF_TEST_WORK}/locale.felf" default)
+set_tests_properties(locale/explicit-c-debug PROPERTIES LABELS "locale")
 
 felf_add_output_test(locale/en-us locale "ctype=en_US\\.UTF-8"
     ${felf_env} -u LC_ALL -u LC_CTYPE -u LC_NUMERIC -u LC_TIME -u LC_COLLATE

@@ -182,6 +182,10 @@ typedef struct {
     int embedded;
     /* LANG to set when the caller set no locale at all, or NULL. */
     const char *default_locale;
+    /* For FELF_DEBUG: the caller's archive, kept when ARCHIVE is NULL,
+     * and why the archive was chosen. */
+    const char *shown_var, *shown;
+    char why[128];
 } locale_choice_t;
 
 static int locale_var_is_set(const char *name)
@@ -208,9 +212,15 @@ static int locale_var_is_set(const char *name)
 static locale_choice_t pick_locale(int have_embedded)
 {
     locale_choice_t choice = {0};
-    if (getenv("LOCALE_ARCHIVE_2_27") != NULL ||
-        getenv("LOCALE_ARCHIVE") != NULL)
-        return choice;
+    static const char *const caller_vars[] = {"LOCALE_ARCHIVE_2_27",
+                                              "LOCALE_ARCHIVE"};
+    for (size_t i = 0; i < 2; i++)
+        if (getenv(caller_vars[i]) != NULL) {
+            choice.shown_var = caller_vars[i];
+            choice.shown = getenv(caller_vars[i]);
+            snprintf(choice.why, sizeof(choice.why), "caller's, kept");
+            return choice;
+        }
     const char *loc = NULL;
     static const char *const vars[] = {"LC_ALL", "LC_CTYPE", "LANG"};
     for (size_t i = 0; i < sizeof(vars) / sizeof(vars[0]) && loc == NULL; i++)
@@ -222,10 +232,14 @@ static locale_choice_t pick_locale(int have_embedded)
     if (loc == NULL && have_embedded) {
         choice.embedded = 1;
         choice.default_locale = "C.UTF-8";
+        snprintf(choice.why, sizeof(choice.why),
+                 "embedded: the caller set no locale");
         return choice;
     }
     if (c_locale && have_embedded) {
         choice.embedded = 1;
+        snprintf(choice.why, sizeof(choice.why),
+                 "embedded: the caller's locale is %s", loc ? loc : "C");
         return choice;
     }
     static const char *const host[] = {
@@ -236,9 +250,15 @@ static locale_choice_t pick_locale(int have_embedded)
     for (size_t i = 0; i < sizeof(host) / sizeof(host[0]); i++)
         if (access(host[i], R_OK) == 0) {
             choice.archive = host[i];
+            snprintf(choice.why, sizeof(choice.why),
+                     "host archive, for the caller's locale %s",
+                     loc ? loc : "(unset)");
             return choice;
         }
     choice.embedded = have_embedded;
+    snprintf(choice.why, sizeof(choice.why), "%s: no host archive for the "
+             "caller's locale %s", have_embedded ? "embedded" : "none",
+             loc ? loc : "(unset)");
     return choice;
 }
 
@@ -577,8 +597,6 @@ int main(int argc, char **argv, char **envp)
         if (is_locale_archive(&db.objects[i]))
             have_locale = 1;
     locale_choice_t locale = pick_locale(have_locale);
-    if (have_locale && !locale.embedded)
-        debug("embedded locale-archive not needed");
 
     for (size_t i = 0; i < db.object_count; i++) {
         const felf_db_object_t *o = &db.objects[i];
@@ -713,8 +731,11 @@ int main(int argc, char **argv, char **envp)
                  locale_fd);
         locale.archive = locale_buf;
     }
-    debug("LOCALE_ARCHIVE=%s",
-          locale.archive ? locale.archive : "(caller's or none)");
+    if (locale.archive != NULL || locale.shown == NULL)
+        debug("LOCALE_ARCHIVE=%s (%s)",
+              locale.archive ? locale.archive : "unset", locale.why);
+    else
+        debug("%s=%s (%s)", locale.shown_var, locale.shown, locale.why);
     if (locale.default_locale != NULL)
         debug("LANG=%s (no caller locale)", locale.default_locale);
     if (felf_build_environment(envp, &db, preload, audit_path, self, root,

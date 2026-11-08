@@ -38,10 +38,6 @@
 
   tree ? true,
 
-  # Compress the libraries too: a smaller file, but every library is then
-  # decompressed into a memfd at start instead of mapped from the file.
-  compressLibraries ? false,
-
   # Strict: only bundled objects and files under the tree may be loaded.
   # GUI applications usually need strict = false so host graphics drivers
   # (libGLX_*/libEGL_*/Vulkan ICDs) can still be dlopen'ed.  Bundled names
@@ -100,11 +96,10 @@
   # executables are left as they are.
   allPrograms ? false,
 
-  # Object compression: a zstd level (1-22) or "none"; null is felf's
-  # default (zstd, level 19).  Compressed objects are decompressed into
-  # memory at every start.  A program built against nixpkgs' glibc gets
-  # FELF's patched loader, and its libraries stay uncompressed and are
-  # mapped straight from the FELF file whatever this says.
+  # Compression: null is felf's default (libraries mapped uncompressed
+  # from the file, the rest zstd level 19).  A zstd level (1-22) compresses
+  # everything, the libraries too: a smaller file, but every library is then
+  # decompressed into a memfd at start.  "none" compresses nothing.
   compress ? null,
 
   # Extra arguments for `felf pack`.
@@ -271,8 +266,7 @@ let
   closureArgs = lib.optionalString closureLibs "@closure-libs";
 
   commonArgs = lib.concatStringsSep " " (
-  lib.optional compressLibraries "--compress-libraries"
-  ++ lib.optional (!strict) "--permissive"
+  lib.optional (!strict) "--permissive"
   ++ lib.optional (compress != null) "--compress ${q (toString compress)}"
   ++ lib.optional lazy "--lazy"
   ++ map (path: "--include ${q path}") includes
@@ -343,7 +337,7 @@ pkgs.runCommand name {
   passthru = {
     inherit package;
     felf = {
-      inherit tree compressLibraries strict lazy compress libDirs includes
+      inherit tree strict lazy compress libDirs includes
         closureLibs
         extraTrees qtPluginsFrom qtConf env keepEmbeddedLibs programs allPrograms;
     };

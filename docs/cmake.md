@@ -64,7 +64,7 @@ felf_pack(myapp-felf
     PROGRAMS myapp-cli=myapp_cli        # a second program in the same FELF
     ENV MYAPP_DATA=$FELF_ROOT/share/myapp
     ROOT ..                             # the FELF in bin/, data in ../share
-    COMPRESS_LIBRARIES                  # smaller file, libraries in memfds
+    COMPRESS 19                         # smaller file, libraries in memfds
     INSTALL_DESTINATION bin)
 install(DIRECTORY data/ DESTINATION share/myapp)
 ```
@@ -107,8 +107,8 @@ packed again whenever the program or a library target it names changes.
 | `HOST_LIBS <pattern>...` | `--host-lib` |
 | `ENV <NAME=VALUE>...` | `--env`; `$FELF_ROOT`, `$FELF_APP` and `$VAR` are passed unexpanded |
 | `ROOT <rel>` | `--root` |
-| `COMPRESS <level\|none>` | `--compress` |
-| `LAZY`, `COMPRESS_LIBRARIES`, `PERMISSIVE`, `NO_DEFAULT_HOST_LIBS` | the flags of the same name |
+| `COMPRESS <level\|none>` | `--compress`: a level compresses the libraries too |
+| `LAZY`, `PERMISSIVE`, `NO_DEFAULT_HOST_LIBS` | the flags of the same name |
 | `EXTRA_ARGS <arg>...` | passed as they are |
 | `DEPENDS <file\|target>...` | more dependencies of the pack step |
 | `EXCLUDE_FROM_ALL` | build it only when asked for |

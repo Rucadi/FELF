@@ -42,8 +42,9 @@ typedef struct {
     /* glibc locale-archive embedded for the bundled glibc (felf's own,
      * src/packer/assets.h).  Every FELF embeds one; NULL is an error. */
     const char *locale_archive;
-    /* Compress libraries too: a smaller file, but they are then copied into
-     * memory at start instead of being mapped from the file. */
+    /* Compress libraries too (an explicit --compress LEVEL): a smaller
+     * file, but they are then copied into memory at start instead of
+     * being mapped from the file. */
     int compress_libraries;
     int strict;
     int lazy;

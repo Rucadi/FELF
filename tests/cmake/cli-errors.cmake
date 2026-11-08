@@ -34,6 +34,12 @@ felf_assert_rc("pack with a bad --compress" 2 "${pack_compress_RESULT}")
 felf_assert_contains("bad --compress message" "${pack_compress_ERROR}"
     "expects a zstd level")
 
+felf_run(pack_complibs "${FELF}" pack "${FELF}" -o
+    "${CMAKE_CURRENT_BINARY_DIR}/x" --compress-libraries)
+felf_assert_rc("pack with --compress-libraries" 2 "${pack_complibs_RESULT}")
+felf_assert_contains("--compress-libraries message" "${pack_complibs_ERROR}"
+    "--compress LEVEL now compresses the libraries")
+
 felf_run(pack_env "${FELF}" pack "${FELF}" -o
     "${CMAKE_CURRENT_BINARY_DIR}/x" --env NOVALUE)
 felf_assert_rc("pack with a bad --env" 2 "${pack_env_RESULT}")

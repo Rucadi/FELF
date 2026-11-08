@@ -30,7 +30,7 @@ target.
   Programs built for that glibc or an older one work, from Nix or from
   other distributions; newer ones are rejected at pack time.
 - Libraries mapped from the file, everything else in zstd-compressed
-  memfds; `--compress-libraries` compresses the libraries too.
+  memfds; an explicit `--compress LEVEL` compresses the libraries too.
 - Strict resolution through a freestanding `LD_AUDIT` module, with the host
   graphics stack preferred.
 - Runtime shim: `/proc/self/exe` reports the FELF path, and child processes
@@ -132,7 +132,7 @@ bundle {
   # binary = "hello";              # default: meta.mainProgram
   # programName = "hello";         # name under $out/bin
   # tree = true;                   # default; false = single file
-  # compressLibraries = false;    # true: smaller, libraries in memfds
+  # compress = 19;                # a level: smaller, libraries in memfds
   # strict = true;                 # false: unknown names fall back to host
   # lazy = true;
   # libDirs = [ "${pkgs.openssl.out}/lib" ];
@@ -291,8 +291,8 @@ Pack options:
 -o, --output PATH          Output FELF executable
     --program [NAME=]PATH  Add another program (run via a symlink NAME)
     --alias PROG=NAME,...  More argv[0] names for a multicall PROG
-    --compress-libraries   Compress the libraries too (memfds, not mapped)
-    --compress LEVEL|none  zstd level 1-22 (default 19), or none
+    --compress LEVEL|none  Compress everything, libraries too, at zstd
+                           LEVEL 1-22; none: nothing (see Compression)
     --permissive           Unknown names fall back to the host (default: strict)
     --lazy                 Resolve bundled SONAMEs on demand via audit
     --include PATH         Also bundle a shared object (names already
@@ -458,8 +458,8 @@ One FELF mixes both ways of loading:
   pages.
 - **Memfds:** everything that has to be a file of its own (the program, the
   loader, the audit module, the shim, the locale archive) is compressed and
-  copied into a memfd at each start, as is every library with
-  `--compress-libraries`.
+  copied into a memfd at each start, as is every library when
+  `--compress LEVEL` is given.
 
 The packer rewrites the `/nix/store` hashes in every embedded object to
 `eeee…`, as nixpkgs' `nuke-refs` does, so Nix sees no dependencies in a
@@ -486,12 +486,13 @@ are mapped from the file; everything else is materialized as memfds.
 
 ### Compression
 
-Objects that become memfds are compressed by default (libraries FELF's
-loader maps from the file are not, unless `--compress-libraries` is given,
-which trades start-up time for a smaller file): `--compress LEVEL` (zstd, 1-22; default
-19) stores each object as independent zstd frames of 2 MiB
-(`FELF_ZSTD_CHUNK`), and `--compress none` stores them as they are
-(`compress = "none"` in `nix/lib/bundle.nix`).  `size` and `sha256` stay
+By default, libraries FELF's loader maps from the file are stored
+uncompressed and every other object is compressed at zstd level 19.
+An explicit `--compress LEVEL` (zstd, 1-22) compresses everything, the
+libraries too, which trades start-up time and shared pages for a smaller
+file: the libraries then become memfds.  `--compress none` stores every
+object as it is (`compress` in `nix/lib/bundle.nix`).  A compressed object
+is a sequence of independent zstd frames of 2 MiB (`FELF_ZSTD_CHUNK`).  `size` and `sha256` stay
 those of the uncompressed object.  An object that does not shrink is stored
 as is.
 

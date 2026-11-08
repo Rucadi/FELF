@@ -45,11 +45,10 @@ static void usage(FILE *out)
         "      --alias PROGRAM=NAME[,NAME...]\n"
         "                             More names for PROGRAM, run with that name\n"
         "                             as argv[0] (multicall binaries; see below)\n"
-        "      --compress-libraries   Compress the libraries too: a smaller file,\n"
-        "                             but they are copied into memory at start\n"
-        "                             instead of mapped from the file\n"
-        "      --compress LEVEL|none  zstd level 1-22 (default %d), or none;\n"
-        "                             objects are decompressed at startup\n"
+        "      --compress LEVEL|none  Compress everything, the libraries too, at\n"
+        "                             zstd level 1-22; none compresses nothing.\n"
+        "                             Without it, libraries are mapped from the\n"
+        "                             file and the rest is compressed at level %d\n"
         "      --permissive           Let names the FELF does not bundle fall\n"
         "                             back to the host (default: strict)\n"
         "      --lazy                 Resolve bundled objects on demand via audit\n"
@@ -113,9 +112,9 @@ static void usage(FILE *out)
         "\n"
         "Every program is bundled with FELF's glibc (felf --version), whose\n"
         "loader maps libraries straight from the FELF file: they are stored\n"
-        "uncompressed (unless --compress-libraries), everything else is\n"
-        "compressed and copied into memory at start.  A program that needs a\n"
-        "newer glibc is rejected.\n"
+        "uncompressed (unless --compress LEVEL is given), everything else\n"
+        "is compressed and copied into memory at start.  A program that\n"
+        "needs a newer glibc is rejected.\n"
         "\n"
         "Checksums detect corruption; they are not signatures.\n", out);
 }
@@ -237,7 +236,6 @@ static int cmd_pack(int argc, char **argv)
 {
     const char *output = NULL;
     const char *root_opt = NULL;
-    int compress_libraries = 0;
     int strict = 1;
     int lazy = 0;
     const char **includes = NULL;
@@ -252,6 +250,7 @@ static int cmd_pack(int argc, char **argv)
     size_t host_lib_count = 0, host_lib_cap = 0;
     int no_default_host_libs = 0;
     int compress_level = DEFAULT_COMPRESS_LEVEL;
+    int compress_given = 0;
     const char **programs = NULL;
     size_t program_count = 0, program_cap = 0;
     const char **aliases = NULL;
@@ -259,7 +258,7 @@ static int cmd_pack(int argc, char **argv)
 
     static const struct option options[] = {
         {"output", required_argument, NULL, 'o'},
-        {"compress-libraries", no_argument, NULL, 1000},
+        {"compress-libraries", no_argument, NULL, 1000}, /* removed */
         {"permissive", no_argument, NULL, 1001},
         {"include", required_argument, NULL, 1006},
         {"lazy", no_argument, NULL, 1007},
@@ -280,7 +279,10 @@ static int cmd_pack(int argc, char **argv)
     while ((c = getopt_long(argc, argv, "o:h", options, NULL)) != -1) {
         switch (c) {
         case 'o': output = optarg; break;
-        case 1000: compress_libraries = 1; break;
+        case 1000:
+            fprintf(stderr, "felf: --compress-libraries was removed; "
+                    "--compress LEVEL now compresses the libraries\n");
+            return 2;
         case 1001: strict = 0; break;
         case 1006:
             if (push_arg(&includes, &include_count, &include_cap,
@@ -316,6 +318,7 @@ static int cmd_pack(int argc, char **argv)
         case 1019:
             if (parse_compress(optarg, &compress_level) != 0)
                 return 2;
+            compress_given = 1;
             break;
         case 1020:
             if (push_arg(&aliases, &alias_count, &alias_cap, optarg) != 0)
@@ -405,7 +408,8 @@ static int cmd_pack(int argc, char **argv)
         .program_count = program_count,
         .aliases = aliases,
         .alias_count = alias_count,
-        .compress_libraries = compress_libraries,
+        /* An explicit level compresses the libraries too. */
+        .compress_libraries = compress_given && compress_level > 0,
         .strict = strict,
         .lazy = lazy,
     };

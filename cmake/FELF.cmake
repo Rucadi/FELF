@@ -18,7 +18,7 @@
 #     [PLUGINS <target|path>...]          libraries kept as files (--plugin)
 #     [LIB_DIRS <dir>...]  [HOST_LIBS <pattern>...]  [ENV <NAME=VALUE>...]
 #     [ROOT <rel>]  [COMPRESS <level|none>]
-#     [LAZY] [COMPRESS_LIBRARIES] [PERMISSIVE] [NO_DEFAULT_HOST_LIBS]
+#     [LAZY] [PERMISSIVE] [NO_DEFAULT_HOST_LIBS]
 #     [EXTRA_ARGS <arg>...]  [DEPENDS <file|target>...]
 #     [EXCLUDE_FROM_ALL]
 #     [INSTALL_DESTINATION <dir> [INSTALL_COMPONENT <component>]])
@@ -158,7 +158,7 @@ endmacro()
 
 function(felf_pack name)
     cmake_parse_arguments(PARSE_ARGV 1 arg
-        "LAZY;COMPRESS_LIBRARIES;PERMISSIVE;NO_DEFAULT_HOST_LIBS;EXCLUDE_FROM_ALL"
+        "LAZY;PERMISSIVE;NO_DEFAULT_HOST_LIBS;EXCLUDE_FROM_ALL"
         "TARGET;PROGRAM;NAME;OUTPUT;ROOT;COMPRESS;INSTALL_DESTINATION;INSTALL_COMPONENT"
         "PROGRAMS;ALIASES;INCLUDES;PLUGINS;LIB_DIRS;HOST_LIBS;ENV;EXTRA_ARGS;DEPENDS")
     if(arg_UNPARSED_ARGUMENTS)
@@ -233,7 +233,7 @@ function(felf_pack name)
     if(arg_COMPRESS)
         list(APPEND args --compress "${arg_COMPRESS}")
     endif()
-    foreach(flag LAZY COMPRESS_LIBRARIES PERMISSIVE NO_DEFAULT_HOST_LIBS)
+    foreach(flag LAZY PERMISSIVE NO_DEFAULT_HOST_LIBS)
         if(arg_${flag})
             string(TOLOWER "--${flag}" option)
             string(REPLACE "_" "-" option "${option}")

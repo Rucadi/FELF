@@ -62,8 +62,7 @@ bundle {
 | `closureLibs` | `true` | Also embed every shared library of the package's runtime closure, so libraries it `dlopen`s are found |
 | `includes` | `[ ]` | More shared objects to embed |
 | `libDirs` | `[ ]` | More library directories |
-| `compressLibraries` | `false` | `true` compresses the libraries too; they then become memfds at start |
-| `compress` | `null` | zstd level or `"none"` for objects copied into memory; `null` is felf's default |
+| `compress` | `null` | `null`: felf's default (libraries mapped from the file, the rest zstd 19); a zstd level compresses everything, libraries too (they become memfds at start); `"none"` compresses nothing |
 | `strict` | `true` | `false` lets unknown names come from the host (GUI programs may need it for host graphics drivers) |
 | `lazy` | `true` | Load libraries on demand through the audit module |
 | `env` | `{ }` | Variables for the application; values may use `$FELF_ROOT`, `$FELF_APP`, `$NAME` |

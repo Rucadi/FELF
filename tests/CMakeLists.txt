@@ -315,7 +315,7 @@ endif()
 
 felf_add_pack_fixture(hello-mapped ${FELF_HELLO} hello-mapped.felf)
 felf_add_pack_fixture(hello-compressed ${FELF_HELLO} hello-compressed.felf
-    --compress-libraries)
+    --compress 19)
 felf_add_pack_fixture(hello-lazy ${FELF_HELLO} hello-lazy.felf --lazy)
 felf_add_pack_fixture(hello-zstd ${FELF_HELLO} hello-zstd.felf --lazy
     --compress 19)
@@ -468,7 +468,7 @@ set_tests_properties(cli/version-direct PROPERTIES
 felf_add_pack_fixture(direct ${FELF_DIRECT} direct.felf --lazy --include
     "${FELF_PLUGIN}")
 felf_add_pack_fixture(direct-compressed ${FELF_DIRECT}
-    direct-compressed.felf --compress-libraries --lazy --include
+    direct-compressed.felf --compress 19 --lazy --include
     "${FELF_PLUGIN}")
 felf_add_pack_fixture(dlopen-direct ${FELF_DLOPEN} dlopen-direct.felf
     --lazy --include "${FELF_PLUGIN}")
@@ -509,6 +509,12 @@ felf_add_fixture_test(direct/library-uncompressed direct ${felf_cli} sql
     "SELECT kind || '=' || compression FROM objects WHERE kind = 'shared'")
 set_tests_properties(direct/library-uncompressed PROPERTIES
     LABELS "direct;sql" FAIL_REGULAR_EXPRESSION "shared=zstd")
+# --compress LEVEL compresses the libraries too.
+felf_add_fixture_test(direct/library-compressed direct-compressed ${felf_cli} sql
+    "${FELF_TEST_WORK}/direct-compressed.felf"
+    "SELECT kind || '=' || compression FROM objects WHERE kind = 'shared'")
+set_tests_properties(direct/library-compressed PROPERTIES
+    LABELS "direct;sql" PASS_REGULAR_EXPRESSION "shared=zstd")
 
 felf_add_output_test(direct/compressed-memfd direct-compressed
     "plugin=memfd value=1234" ${CMAKE_COMMAND} -E env

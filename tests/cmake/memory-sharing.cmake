@@ -2,7 +2,7 @@ include("${CMAKE_CURRENT_LIST_DIR}/TestUtils.cmake")
 
 # Two programs of one FELF map the same libraries from the same file at the
 # same offsets, so the page cache holds one copy.  PSS charges a page shared
-# by N processes 1/N to each.  With --compress-libraries each process has
+# by N processes 1/N to each.  With --compress LEVEL each process has
 # its own memfds and is charged all of it.
 
 # mapping keys ("offset device inode") of executable mappings from PREFIX.
@@ -98,7 +98,7 @@ function(felf_pack_share mode out_dir)
     if(mode STREQUAL "lazy")
         set(extra --lazy)
     elseif(mode STREQUAL "compressed")
-        set(extra --compress-libraries)
+        set(extra --compress 19)
     endif()
     felf_run("pack_${mode}" "${FELF}" pack "${SHARE_ONE}"
         --program "${SHARE_TWO}" ${extra} -o "${out_dir}/share.felf")

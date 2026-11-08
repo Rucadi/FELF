@@ -20,8 +20,7 @@ skipped), for argument lists too long for a command line:
 | `-o PATH` | The FELF to write (written to a temporary file and renamed) |
 | `--program [NAME=]PATH` | Another program in the same FELF, run when the FELF is invoked as NAME (a symlink to it).  Programs share the libraries.  A second name for an already embedded file becomes an alias, so multicall binaries keep one copy. |
 | `--alias PROGRAM=NAME[,NAME...]` | More names for an embedded program (a multicall binary such as coreutils or busybox): invoked as NAME, it runs with NAME as `argv[0]`.  PROGRAM is a program name or one of its aliases; NAME must not name another object. |
-| `--compress-libraries` | Compress the libraries too, for a smaller file.  They are then decompressed into memfds at start instead of mapped from the file. |
-| `--compress LEVEL\|none` | zstd level for the objects that are copied into memory at start (default 19).  Libraries FELF's loader maps from the file are not compressed unless `--compress-libraries` is given. |
+| `--compress LEVEL\|none` | Without it, libraries are stored uncompressed and mapped from the file, and the other objects are compressed at zstd level 19.  A LEVEL (1-22) compresses everything at that level, the libraries too, for a smaller file: they are then decompressed into memfds at start instead of mapped.  `none` compresses nothing. |
 | `--permissive` | Names the FELF does not bundle may be loaded from the host.  The default is strict: only bundled objects, files under the bundle root, and the host graphics stack. |
 | `--lazy` | Libraries are loaded on demand by name through the audit module.  Without it, libraries kept in memfds are also preloaded with `LD_PRELOAD`. |
 | `--include PATH` | Embed a shared object and its dependencies, for libraries the program only `dlopen`s.  A library whose name is already bundled is skipped; one that is not a library for the target or whose dependencies cannot be found is a warning. |
@@ -95,10 +94,11 @@ holds metadata, including each object's compression.  With FELF's glibc,
 the database records `direct_map`, and:
 
 - libraries (`shared`, `plugin`) are stored uncompressed, at offsets
-  aligned for `mmap`, so the loader maps them from the file (with
-  `--compress-libraries` they are compressed and become memfds instead);
+  aligned for `mmap`, so the loader maps them from the file (with an
+  explicit `--compress LEVEL` they are compressed and become memfds
+  instead);
 - everything else (program, loader, audit module, shim, locale archive) is
-  compressed with `--compress`.
+  compressed, at level 19 unless `--compress` says otherwise.
 
 In every object, `/nix/store/<hash>` strings are rewritten to
 `/nix/store/eeee...` (as nixpkgs' `nuke-refs` does), so Nix sees no

@@ -311,12 +311,14 @@ walls.
 
 ## Capabilities
 
-- **Strict by default.** Only bundled libraries, files under the bundle root
-  and the host graphics stack may load, and the caller's `LD_PRELOAD`,
-  `LD_LIBRARY_PATH` and `LD_AUDIT` can't inject anything. `--permissive`
+- **Strict by default.** Only bundled libraries, files under the bundle
+  root, and the host's graphics stack and NSS modules may load; the
+  caller's `LD_PRELOAD`, `LD_LIBRARY_PATH` and `LD_AUDIT` can't inject
+  anything. `--permissive`
   lets unknown names fall back to the host.
-- **Host graphics.** libGL, EGL, Vulkan, DRM, VA-API, Mesa and NVIDIA
-  drivers come from the host, found the way the host's `ld.so` would.
+- **Host graphics and NSS.** libGL, EGL, Vulkan, DRM, VA-API, Mesa and
+  NVIDIA drivers, and the NSS modules that resolve users and hosts (`sss`,
+  `systemd`, `ldap`…), come from the host, found the way its `ld.so` would.
 - **Invisible to children.** A shim makes `/proc/self/exe` the FELF's path,
   and child processes get the caller's environment, without FELF's
   variables or descriptors.

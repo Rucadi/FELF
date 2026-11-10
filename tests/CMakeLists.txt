@@ -171,6 +171,26 @@ target_link_libraries(felf-test-tree-plugin PRIVATE felf-test-tree-dep)
 set_target_properties(felf-test-tree-plugin PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY "${FELF_TEST_WORK}/tree-build")
 
+# A PT_INTERP too short to hold /proc/self/fd/<fd>: rejected by pack.
+felf_fixture_exe(felf-test-short-interp short_interp
+    ${CMAKE_CURRENT_SOURCE_DIR}/hello/hello.c)
+target_link_options(felf-test-short-interp PRIVATE
+    -Wl,--dynamic-linker=/ld.so)
+
+# Thousands of objects in one FELF (tests/cmake/many-objects.cmake).
+felf_fixture_exe(felf-test-many many_test ${CMAKE_CURRENT_SOURCE_DIR}/many/main.c)
+target_link_libraries(felf-test-many PRIVATE ${CMAKE_DL_LIBS})
+add_library(felf-test-many-lib MODULE ${CMAKE_CURRENT_SOURCE_DIR}/many/lib.c)
+set_target_properties(felf-test-many-lib PROPERTIES NO_SONAME ON)
+
+# A host NSS module, loaded through /etc/nsswitch.conf (tests/nss/run.sh).
+felf_fixture_lib(felf-test-nss-module nss_felftest libnss_felftest.so.2
+    ${CMAKE_CURRENT_SOURCE_DIR}/nss/module.c)
+set_target_properties(felf-test-nss-module PROPERTIES
+    SUFFIX ".so.2"
+    LIBRARY_OUTPUT_DIRECTORY "${FELF_TEST_WORK}/nss-host")
+felf_fixture_exe(felf-test-nss nss_test ${CMAKE_CURRENT_SOURCE_DIR}/nss/main.c)
+
 # Host-preferred library: the embedded copy returns 1, the host copy 2+40.
 felf_fixture_lib(felf-test-hostlib felfhost libfelfhost.so.1
     ${CMAKE_CURRENT_SOURCE_DIR}/host/hostlib.c)
@@ -298,7 +318,8 @@ set_tests_properties(cli/help PROPERTIES
 
 felf_add_script_test(cli/errors cli-errors.cmake
     -DFELF=${felf_cli}
-    -DHELLO=${FELF_HELLO})
+    -DHELLO=${FELF_HELLO}
+    -DSHORT_INTERP=$<TARGET_FILE:felf-test-short-interp>)
 set_tests_properties(cli/errors PROPERTIES LABELS "cli")
 
 if(FELF_TEST_STATIC_CLI AND FELF_TEST_READELF)
@@ -325,6 +346,7 @@ felf_add_pack_fixture(hello-plain ${FELF_HELLO} hello-plain.felf --lazy
 felf_add_pack_fixture(exit ${FELF_EXIT} exit.felf)
 felf_add_pack_fixture(locale ${FELF_LOCALE} locale.felf --lazy)
 felf_add_pack_fixture(nofile ${FELF_NOFILE} nofile.felf --lazy)
+felf_add_pack_fixture(nss $<TARGET_FILE:felf-test-nss> nss.felf)
 if(felf_have_cxx)
     felf_add_pack_fixture(cpp "$<TARGET_FILE:felf-test-cpp>" cpp.felf)
     felf_add_pack_fixture(cpp-lazy "$<TARGET_FILE:felf-test-cpp>"
@@ -445,6 +467,13 @@ felf_add_output_test(dlopen/absolute-path dlopen-lazy
     "${FELF_TEST_WORK}/dlopen-lazy.felf"
     "${FELF_TEST_WORK}/hostlibs/libplugin.so")
 set_tests_properties(dlopen/absolute-path PROPERTIES LABELS "dlopen")
+
+felf_add_script_test(pack/many-objects many-objects.cmake
+    -DFELF=${felf_cli}
+    -DWORK=${FELF_TEST_WORK}
+    -DPROGRAM=$<TARGET_FILE:felf-test-many>
+    -DLIB=$<TARGET_FILE:felf-test-many-lib>)
+set_tests_properties(pack/many-objects PROPERTIES LABELS "pack;slow")
 
 felf_add_script_test(dlopen/include-warnings include-warnings.cmake
     -DFELF=${felf_cli}
@@ -986,4 +1015,23 @@ if(FELF_TEST_BUSYBOX AND EXISTS "${FELF_TEST_BUSYBOX}"
 else()
     message(STATUS
         "FELF tests: /nix-masked test disabled (FELF_TEST_BUSYBOX/unshare)")
+endif()
+
+# --------------------------------------------------------------------------
+# NSS: the host's modules (libnss_*) are loaded, so users that only a host
+# source knows (sss, ldap, systemd...) resolve.  Needs a user and mount
+# namespace; skipped without one.
+
+if(FELF_TEST_UNSHARE AND FELF_TEST_BASH)
+    add_test(NAME runtime/nss-host-module
+        COMMAND "${FELF_TEST_BASH}" "${CMAKE_CURRENT_SOURCE_DIR}/nss/run.sh"
+            "${FELF_TEST_UNSHARE}" "${FELF_TEST_WORK}/nss.felf"
+            "${FELF_TEST_WORK}/nss-host" "${FELF_TEST_WORK}")
+    set_tests_properties(runtime/nss-host-module PROPERTIES
+        FIXTURES_REQUIRED nss
+        LABELS "runtime;nss"
+        SKIP_RETURN_CODE 77
+        PASS_REGULAR_EXPRESSION "user felf-nss-user: uid=4242")
+else()
+    message(STATUS "FELF tests: NSS module test disabled (unshare)")
 endif()

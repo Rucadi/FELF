@@ -2,6 +2,7 @@
 #define FELF_RESOLVER_H
 
 #include "felf_arch.h"
+#include "felf_file.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -42,11 +43,13 @@ typedef struct {
     char **search_dirs;
     size_t search_count;
     size_t search_cap;
-    /* FELF's glibc: its loader is bundled, and glibc's libraries are taken
-     * from it, for every program; direct_map is then set (the loader maps
-     * uncompressed libraries from the file).  NULL: each program's
-     * PT_INTERP, whose canonical path is program_interp. */
-    char *glibc_dir;
+    /* FELF's glibc, GLIBC_COUNT files (not owned): its loader is bundled,
+     * and glibc's libraries are taken from it, for every program;
+     * direct_map is then set (the loader maps uncompressed libraries from
+     * the file).  Without a loader for the target among them: each
+     * program's PT_INTERP, whose canonical path is program_interp. */
+    const felf_source_t *glibc;
+    size_t glibc_count;
     char *program_interp;
     int direct_map;
     /* Bundle root relative to the output's directory, or NULL. */
@@ -90,14 +93,15 @@ int felf_resolver_add_program_alias(felf_resolver_t *r, const char *program,
                                     const char *name, char *err,
                                     size_t errlen);
 
-int felf_resolver_add_audit(felf_resolver_t *r, const char *path,
+int felf_resolver_add_audit(felf_resolver_t *r, const felf_source_t *source,
                             char *err, size_t errlen);
-int felf_resolver_add_runtime(felf_resolver_t *r, const char *path,
+int felf_resolver_add_runtime(felf_resolver_t *r, const felf_source_t *source,
                               char *err, size_t errlen);
 int felf_resolver_add_env(felf_resolver_t *r, const char *entry,
                           char *err, size_t errlen);
-/* Embed the file at PATH as a non-ELF "resource" object called NAME. */
-int felf_resolver_add_resource(felf_resolver_t *r, const char *path,
+/* Embed SOURCE as a non-ELF "resource" object called NAME. */
+int felf_resolver_add_resource(felf_resolver_t *r,
+                               const felf_source_t *source,
                                const char *name, char *err, size_t errlen);
 int felf_resolver_add_host_lib(felf_resolver_t *r, const char *pattern,
                                char *err, size_t errlen);

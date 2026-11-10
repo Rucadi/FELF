@@ -74,18 +74,14 @@
 #define FELF_MAP_PREFIX "felf-map-1:"
 #define FELF_CONTAINER_FD 999
 
-#define FELF_AUDIT_INDEX_MAGIC "FELFA3\0\0"
-#define FELF_AUDIT_INDEX_VERSION 3u
+#define FELF_AUDIT_INDEX_MAGIC "FELFA4\0\0"
+#define FELF_AUDIT_INDEX_VERSION 4u
 #define FELF_AUDIT_NAME_SIZE 128u
 #define FELF_AUDIT_PATH_SIZE 32u
 #define FELF_AUDIT_ROOT_SIZE 1024u
 #define FELF_AUDIT_DIR_SIZE 256u
 #define FELF_AUDIT_MAX_DIRS 64u
 #define FELF_AUDIT_MAX_PATTERNS 256u
-#define FELF_AUDIT_MAX_ENTRIES 65536u
-/* The audit module reads the index into a static buffer of this size.  A
- * larger index cannot be read, and the module would fail closed. */
-#define FELF_AUDIT_BUFFER_SIZE 4194304u
 
 #define FELF_AUDIT_FLAG_STRICT 0x1u
 #define FELF_AUDIT_FLAG_DEBUG 0x2u
@@ -94,12 +90,15 @@
  * Audit index layout, in this order:
  *
  *   header
- *   entry_count     x felf_audit_index_entry_t   bundled name -> memfd path
+ *   entry_count     x felf_audit_index_entry_t   bundled name -> memfd path,
+ *                                                sorted by name (strcmp),
+ *                                                each name once
  *   pattern_count   x char[FELF_AUDIT_NAME_SIZE] host-preferred patterns
  *   libpath_count   x char[FELF_AUDIT_DIR_SIZE]  caller's LD_LIBRARY_PATH
  *   default_count   x char[FELF_AUDIT_DIR_SIZE]  host default directories
  *
- * The audit module searches the host like the host's ld.so would:
+ * The audit module maps the index and finds a name by binary search, so
+ * the number of objects is not bounded.  It searches the host like the host's ld.so would:
  * LD_LIBRARY_PATH directories, then /etc/ld.so.cache, then the defaults.
  */
 typedef struct __attribute__((packed)) {

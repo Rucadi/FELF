@@ -13,6 +13,13 @@
  * directories (NixOS keeps libglvnd in the store and only the vendor
  * drivers in /run/opengl-driver/lib).
  *
+ * NSS modules are host-preferred for the same reason: /etc/nsswitch.conf
+ * names the host's sources of users, groups and hosts (systemd, sss,
+ * ldap, mdns...), and glibc dlopens libnss_<source>.so.2 for each.  The
+ * host's module runs against the bundled glibc; one that cannot load is
+ * UNAVAIL to NSS, which moves on to the next source.  files and dns are
+ * built into libc.
+ *
  * A pattern is an exact file name or a prefix followed by a single
  * trailing '*'.  Patterns match the basename of a requested name.
  *
@@ -52,6 +59,8 @@ static const char *const felf_default_host_libs[] = {
     "libva-wayland.so.2",
     "libvdpau.so.1",
     "libvdpau_*",
+    /* NSS modules named by /etc/nsswitch.conf */
+    "libnss_*",
 };
 
 #define FELF_DEFAULT_HOST_LIB_COUNT \

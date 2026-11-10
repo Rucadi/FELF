@@ -284,46 +284,20 @@ static int add_include(felf_resolver_t *r, const char *path, size_t *warned,
     return 0;
 }
 
-static int build_database(felf_resolver_t *r, int strict,
-                          int lazy, uint8_t **out, size_t *out_size,
-                          char *err, size_t errlen)
+static int given(const felf_source_t *source)
 {
-    const char *tmpdir = getenv("TMPDIR");
-    char tmp[PATH_MAX];
-    snprintf(tmp, sizeof(tmp), "%s/felf-db-XXXXXX",
-             tmpdir != NULL && tmpdir[0] != '\0' ? tmpdir : "/tmp");
-    int fd = mkstemp(tmp);
-    if (fd < 0) {
-        felf_set_error(err, errlen, "cannot create temporary database: %s",
-                       strerror(errno));
-        return -1;
-    }
-    close(fd);
-    unlink(tmp);
-    felf_object_t *program = felf_resolver_program(r);
-    const char *package_name = program ? program->name : "program";
-    if (felf_db_build_file(r, tmp, package_name, FELF_VERSION_STRING,
-                           "felf " FELF_VERSION_STRING, strict,
-                           lazy, err, errlen) != 0) {
-        unlink(tmp);
-        return -1;
-    }
-    int rc = felf_read_file(tmp, out, out_size, err, errlen);
-    unlink(tmp);
-    if (rc == 0)
-        felf_db_normalize(*out, *out_size);
-    return rc;
+    return source->path != NULL || source->data != NULL;
 }
 
 /* Read the bootstrap the kernel runs, the outer ELF of the FELF. */
-static int read_bootstrap(const char *path, uint8_t **out, size_t *size,
-                          char *err, size_t errlen)
+static int read_bootstrap(const felf_source_t *source, uint8_t **out,
+                          size_t *size, char *err, size_t errlen)
 {
-    if (path == NULL || path[0] == '\0') {
+    if (!given(source)) {
         felf_set_error(err, errlen, "no FELF bootstrap executable was found");
         return -1;
     }
-    if (felf_read_file(path, out, size, err, errlen) != 0)
+    if (felf_source_read(source, out, size, err, errlen) != 0)
         return -1;
     if (felf_outer_elf_validate(*out, *size, err, errlen) != 0) {
         free(*out);
@@ -335,10 +309,12 @@ static int read_bootstrap(const char *path, uint8_t **out, size_t *size,
 
 /* The bootstrap must be built for the architecture of the programs it
  * starts. */
-static int check_bootstrap_arch(const uint8_t *bootstrap, const char *path,
+static int check_bootstrap_arch(const uint8_t *bootstrap,
+                                const felf_source_t *source,
                                 const felf_arch_t *arch, char *err,
                                 size_t errlen)
 {
+    const char *path = source->path ? source->path : source->name;
     const Elf64_Ehdr *outer = (const Elf64_Ehdr *)bootstrap;
     if (outer->e_machine == arch->machine)
         return 0;
@@ -472,27 +448,22 @@ int felf_pack(const felf_pack_options_t *options, char *err, size_t errlen)
     /* Not optional: the bundled glibc has no locale location on the host,
      * and applications such as btop refuse to start without a UTF-8
      * locale. */
-    if (options->locale_archive == NULL) {
+    if (!given(&options->locale_archive)) {
         felf_set_error(err, errlen,
                        "a FELF must embed a glibc locale archive");
         return -1;
     }
     uint8_t *bootstrap = NULL;
     size_t bootstrap_size = 0;
-    if (read_bootstrap(options->bootstrap, &bootstrap, &bootstrap_size,
+    if (read_bootstrap(&options->bootstrap, &bootstrap, &bootstrap_size,
                        err, errlen) != 0)
         return -1;
 
     felf_resolver_t r;
     felf_resolver_init(&r);
     r.strict = options->strict;
-    if (options->glibc_dir != NULL) {
-        r.glibc_dir = strdup(options->glibc_dir);
-        if (r.glibc_dir == NULL) {
-            felf_set_error(err, errlen, "out of memory");
-            goto fail;
-        }
-    }
+    r.glibc = options->glibc;
+    r.glibc_count = options->glibc_count;
 
     if (add_program_spec(&r, options->input, err, errlen) != 0)
         goto fail;
@@ -520,15 +491,13 @@ int felf_pack(const felf_pack_options_t *options, char *err, size_t errlen)
     }
     /* The audit module is embedded in every mode: it implements the
      * host-library lookup as well as strict-mode enforcement. */
-    if (options->audit != NULL) {
-        if (felf_resolver_add_audit(&r, options->audit, err, errlen) != 0)
-            goto fail;
-    }
-    if (options->shim != NULL) {
-        if (felf_resolver_add_runtime(&r, options->shim, err, errlen) != 0)
-            goto fail;
-    }
-    if (felf_resolver_add_resource(&r, options->locale_archive,
+    if (given(&options->audit) &&
+        felf_resolver_add_audit(&r, &options->audit, err, errlen) != 0)
+        goto fail;
+    if (given(&options->shim) &&
+        felf_resolver_add_runtime(&r, &options->shim, err, errlen) != 0)
+        goto fail;
+    if (felf_resolver_add_resource(&r, &options->locale_archive,
                                    "locale-archive", err, errlen) != 0)
         goto fail;
     for (size_t i = 0; i < options->env_count; i++) {
@@ -580,7 +549,7 @@ int felf_pack(const felf_pack_options_t *options, char *err, size_t errlen)
                        "resolved container has no program/interpreter");
         goto fail;
     }
-    if (check_bootstrap_arch(bootstrap, options->bootstrap, r.arch,
+    if (check_bootstrap_arch(bootstrap, &options->bootstrap, r.arch,
                              err, errlen) != 0)
         goto fail;
 
@@ -597,8 +566,10 @@ int felf_pack(const felf_pack_options_t *options, char *err, size_t errlen)
         goto fail;
     uint8_t *db = NULL;
     size_t db_size = 0;
-    if (build_database(&r, options->strict,
-                       options->lazy, &db, &db_size, err, errlen) != 0)
+    felf_object_t *program = felf_resolver_program(&r);
+    if (felf_db_build(&r, program->name, FELF_VERSION_STRING,
+                      "felf " FELF_VERSION_STRING, options->strict,
+                      options->lazy, &db, &db_size, err, errlen) != 0)
         goto fail;
     uint32_t flags = (options->strict ? FELF_FLAG_STRICT : 0) |
                      (options->lazy ? FELF_FLAG_LAZY : 0);

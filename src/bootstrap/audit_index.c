@@ -15,15 +15,6 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-static int object_index_by_id(const felf_db_t *db, int64_t id)
-{
-    for (size_t i = 0; i < db->object_count; i++) {
-        if (db->objects[i].id == id)
-            return (int)i;
-    }
-    return -1;
-}
-
 /* The path the audit module returns for an object: its memfd, or a
  * reference to it in the FELF file when the loader maps it from there. */
 static void object_path(char *out, size_t outlen, int fd, uint64_t offset)
@@ -35,22 +26,29 @@ static void object_path(char *out, size_t outlen, int fd, uint64_t offset)
         snprintf(out, outlen, "/proc/self/fd/%d", fd);
 }
 
-static int add_index_entry(felf_audit_index_entry_t *entries,
-                           uint32_t *count, const char *name, int fd,
-                           uint64_t offset)
+/* A name the index will hold, in the order the names were found: of the
+ * objects sharing a name, the first one found keeps it. */
+typedef struct {
+    const char *name;
+    size_t object;
+    size_t order;
+} index_name_t;
+
+static void add_name(index_name_t *names, size_t *count, const char *name,
+                     size_t object)
 {
     if (name == NULL || name[0] == '\0' ||
         strlen(name) >= FELF_AUDIT_NAME_SIZE)
-        return 0;
-    for (uint32_t i = 0; i < *count; i++) {
-        if (strcmp(entries[i].name, name) == 0)
-            return 0;
-    }
-    felf_audit_index_entry_t *entry = &entries[*count];
-    snprintf(entry->name, sizeof(entry->name), "%s", name);
-    object_path(entry->path, sizeof(entry->path), fd, offset);
+        return;
+    names[*count] = (index_name_t){name, object, *count};
     (*count)++;
-    return 0;
+}
+
+static int name_order(const void *pa, const void *pb)
+{
+    const index_name_t *a = pa, *b = pb;
+    int c = strcmp(a->name, b->name);
+    return c != 0 ? c : (a->order > b->order) - (a->order < b->order);
 }
 
 /* Append DIR if it is an absolute, existing directory not yet listed. */
@@ -81,17 +79,19 @@ int felf_build_audit_index(const felf_db_t *db, const int *object_fds,
                            const char *ld_library_path,
                            char *err, size_t errlen)
 {
+    /* Every name an object can be asked for by, then sorted, so the audit
+     * module can search them however many there are. */
     size_t max_entries = db->object_count * 2 + db->alias_count;
-    if (max_entries > FELF_AUDIT_MAX_ENTRIES) {
-        felf_set_error(err, errlen, "too many objects for the audit index");
-        return -1;
-    }
+    index_name_t *names = malloc((max_entries ? max_entries : 1) *
+                                 sizeof(*names));
     size_t bytes = sizeof(felf_audit_index_header_t) +
                    max_entries * sizeof(felf_audit_index_entry_t) +
                    FELF_AUDIT_MAX_PATTERNS * FELF_AUDIT_NAME_SIZE +
                    2 * FELF_AUDIT_MAX_DIRS * FELF_AUDIT_DIR_SIZE;
     uint8_t *buffer = calloc(1, bytes);
-    if (buffer == NULL) {
+    if (names == NULL || buffer == NULL || max_entries > UINT32_MAX) {
+        free(names);
+        free(buffer);
         felf_set_error(err, errlen, "out of memory building audit index");
         return -1;
     }
@@ -102,6 +102,7 @@ int felf_build_audit_index(const felf_db_t *db, const int *object_fds,
                     (debug ? FELF_AUDIT_FLAG_DEBUG : 0u);
     if (root != NULL) {
         if (strlen(root) >= sizeof(header->root)) {
+            free(names);
             free(buffer);
             felf_set_error(err, errlen, "bundle root path is too long");
             return -1;
@@ -111,25 +112,37 @@ int felf_build_audit_index(const felf_db_t *db, const int *object_fds,
     felf_audit_index_entry_t *entries =
         (felf_audit_index_entry_t *)(buffer + sizeof(*header));
 
-    uint32_t count = 0;
+    size_t found = 0;
     for (size_t i = 0; i < db->object_count; i++) {
         const felf_db_object_t *object = &db->objects[i];
         if ((object_fds[i] < 0 && direct_offsets[i] == 0) ||
             !is_library(object))
             continue;
-        add_index_entry(entries, &count, object->name, object_fds[i],
-                        direct_offsets[i]);
-        add_index_entry(entries, &count, object->soname, object_fds[i],
-                        direct_offsets[i]);
+        add_name(names, &found, object->name, i);
+        add_name(names, &found, object->soname, i);
     }
     for (size_t i = 0; i < db->alias_count; i++) {
-        int index = object_index_by_id(db, db->aliases[i].object_id);
-        if (index < 0 || !is_library(&db->objects[index]) ||
-            (object_fds[index] < 0 && direct_offsets[index] == 0))
+        const felf_db_object_t *object =
+            felf_db_object_by_id(db, db->aliases[i].object_id);
+        if (object == NULL || !is_library(object))
             continue;
-        add_index_entry(entries, &count, db->aliases[i].alias,
-                        object_fds[index], direct_offsets[index]);
+        size_t index = (size_t)(object - db->objects);
+        if (object_fds[index] < 0 && direct_offsets[index] == 0)
+            continue;
+        add_name(names, &found, db->aliases[i].alias, index);
     }
+    qsort(names, found, sizeof(*names), name_order);
+    uint32_t count = 0;
+    for (size_t i = 0; i < found; i++) {
+        if (i > 0 && strcmp(names[i].name, names[i - 1].name) == 0)
+            continue;
+        felf_audit_index_entry_t *entry = &entries[count++];
+        snprintf(entry->name, sizeof(entry->name), "%s", names[i].name);
+        object_path(entry->path, sizeof(entry->path),
+                    object_fds[names[i].object],
+                    direct_offsets[names[i].object]);
+    }
+    free(names);
     header->entry_count = count;
     char *tail = (char *)(entries + count);
 
@@ -177,14 +190,6 @@ int felf_build_audit_index(const felf_db_t *db, const int *object_fds,
     header->default_count = defaults;
     tail = defaults_start + (size_t)defaults * FELF_AUDIT_DIR_SIZE;
     bytes = (size_t)(tail - (char *)buffer);
-    if (bytes > FELF_AUDIT_BUFFER_SIZE) {
-        free(buffer);
-        felf_set_error(err, errlen,
-                       "audit index is too large (%zu bytes, the audit "
-                       "module reads at most %u)", bytes,
-                       FELF_AUDIT_BUFFER_SIZE);
-        return -1;
-    }
 
     int fd = felf_memfd_from_bytes("audit-index", buffer, bytes,
                                    FELF_AUDIT_INDEX_FD, err, errlen);

@@ -135,10 +135,6 @@ int felf_footer_validate(const felf_footer_t *footer, uint64_t file_size,
                        "database overlaps the ELF payload region");
         return -1;
     }
-    if (footer->object_count > FELF_MAX_OBJECTS) {
-        felf_set_error(err, errlen, "object count exceeds the format limit");
-        return -1;
-    }
     if (footer->index_size != 0 &&
         felf_range_valid(footer->index_offset, footer->index_size,
                          file_size - FELF_FOOTER_SIZE, err, errlen) != 0)

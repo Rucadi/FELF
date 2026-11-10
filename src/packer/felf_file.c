@@ -66,6 +66,23 @@ int felf_read_file(const char *path, uint8_t **out, size_t *out_size,
     return 0;
 }
 
+int felf_source_read(const felf_source_t *source, uint8_t **out,
+                     size_t *out_size, char *err, size_t errlen)
+{
+    if (source->path != NULL)
+        return felf_read_file(source->path, out, out_size, err, errlen);
+    uint8_t *copy = source->size != 0 ? malloc(source->size) : NULL;
+    if (copy == NULL) {
+        felf_set_error(err, errlen, "out of memory reading %s",
+                       source->name ? source->name : "a built-in file");
+        return -1;
+    }
+    memcpy(copy, source->data, source->size);
+    *out = copy;
+    *out_size = source->size;
+    return 0;
+}
+
 int felf_write_file(const char *path, const uint8_t *data, size_t size,
                     mode_t mode, char *err, size_t errlen)
 {
@@ -85,8 +102,11 @@ int felf_write_file(const char *path, const uint8_t *data, size_t size,
         }
         done += (size_t)n;
     }
-    /* close() reports delayed write errors (NFS, quotas). */
-    int failed = done != size || fchmod(fd, mode) < 0;
+    /* An existing file keeps its mode through open(): set it, within the
+     * caller's umask.  close() reports delayed write errors (NFS, quotas). */
+    mode_t mask = umask(0);
+    umask(mask);
+    int failed = done != size || fchmod(fd, mode & ~mask) < 0;
     if (close(fd) < 0)
         failed = 1;
     if (failed) {

@@ -75,7 +75,7 @@ loads before libc is usable. `la_objsearch()` decides each lookup:
 flowchart TD
     Q[library requested] --> fd{/proc/self/fd path?}
     fd -->|yes| ok1[allow]
-    fd -->|no| host{host-preferred?<br/>GL, Vulkan, DRM, VA-API, NVIDIA}
+    fd -->|no| host{host-preferred?<br/>GL, Vulkan, DRM, VA-API,<br/>NVIDIA, NSS modules}
     host -->|yes| onhost{found on the host?}
     onhost -->|yes| hostlib[host copy]
     onhost -->|no| idx

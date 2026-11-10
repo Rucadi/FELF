@@ -110,6 +110,9 @@ static int parse_versions(felf_elf_t *elf, const Elf64_Dyn *entries,
             break;
         at += vd->vd_next;
     }
+    /* Entries that share bytes (a crafted vna_next) could be walked
+     * billions of times; real ones cannot outnumber the file's bytes. */
+    uint64_t aux_left = elf->size / sizeof(Elf64_Vernaux);
     at = verneed;
     for (uint64_t i = 0; i < verneednum && i < 65536; i++) {
         const Elf64_Verneed *vn = (const Elf64_Verneed *)
@@ -125,7 +128,7 @@ static int parse_versions(felf_elf_t *elf, const Elf64_Dyn *entries,
         for (unsigned j = 0; j < vn->vn_cnt; j++) {
             const Elf64_Vernaux *va = (const Elf64_Vernaux *)
                 at_vaddr(elf, aux_at, sizeof(*va));
-            if (va == NULL) {
+            if (va == NULL || aux_left-- == 0) {
                 felf_set_error(err, errlen, "DT_VERNEED is out of bounds");
                 return -1;
             }
@@ -245,8 +248,15 @@ static int parse_dynamic(felf_elf_t *elf, char *err, size_t errlen)
 
 int felf_elf_load(const char *path, felf_elf_t *elf, char *err, size_t errlen)
 {
+    felf_source_t source = {.path = path};
+    return felf_elf_load_source(&source, path, elf, err, errlen);
+}
+
+int felf_elf_load_source(const felf_source_t *source, const char *path,
+                         felf_elf_t *elf, char *err, size_t errlen)
+{
     memset(elf, 0, sizeof(*elf));
-    if (felf_read_file(path, &elf->data, &elf->size, err, errlen) != 0)
+    if (felf_source_read(source, &elf->data, &elf->size, err, errlen) != 0)
         return -1;
     elf->path = strdup(path);
     if (elf->path == NULL) {

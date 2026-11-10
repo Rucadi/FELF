@@ -185,20 +185,43 @@ static char *join_host_libs(const felf_resolver_t *r)
     return joined;
 }
 
-int felf_db_build_file(felf_resolver_t *r, const char *path,
-                       const char *package_name, const char *package_version,
-                       const char *created_by, int strict,
-                       int lazy, char *err, size_t errlen)
+/* Big-endian u32 at offset AT of the database header. */
+static void put_be32(uint8_t *at, uint32_t value)
 {
+    at[0] = (uint8_t)(value >> 24);
+    at[1] = (uint8_t)(value >> 16);
+    at[2] = (uint8_t)(value >> 8);
+    at[3] = (uint8_t)value;
+}
+
+/* SQLite counts the writes in the database header (the file change
+ * counter, the schema cookie): set them to 1, so the bytes depend only on
+ * the content, however it was written. */
+static void felf_db_normalize(uint8_t *db, size_t size)
+{
+    if (size < 100)
+        return;
+    put_be32(db + 24, 1); /* file change counter */
+    put_be32(db + 40, 1); /* schema cookie */
+    put_be32(db + 92, 1); /* version-valid-for: equal to the counter */
+}
+
+int felf_db_build(felf_resolver_t *r, const char *package_name,
+                  const char *package_version, const char *created_by,
+                  int strict, int lazy, uint8_t **out, size_t *out_size,
+                  char *err, size_t errlen)
+{
+    /* Built in memory and serialized: no temporary file. */
     sqlite3 *db = NULL;
-    if (sqlite3_open_v2(path, &db,
-                        SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE |
-                        SQLITE_OPEN_EXCLUSIVE, NULL) != SQLITE_OK) {
-        felf_set_error(err, errlen, "cannot create SQLite database %s: %s",
-                       path, db ? sqlite3_errmsg(db) : "unknown error");
+    if (sqlite3_open_v2(":memory:", &db,
+                        SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE,
+                        NULL) != SQLITE_OK) {
+        felf_set_error(err, errlen, "cannot create SQLite database: %s",
+                       db ? sqlite3_errmsg(db) : "unknown error");
         goto fail;
     }
-    if (exec_sql(db, FELF_SCHEMA_SQL, err, errlen) != 0)
+    if (exec_sql(db, "PRAGMA temp_store = MEMORY;", err, errlen) != 0 ||
+        exec_sql(db, FELF_SCHEMA_SQL, err, errlen) != 0)
         goto fail;
 
     char format[16];
@@ -266,31 +289,23 @@ int felf_db_build_file(felf_resolver_t *r, const char *path,
 
     if (exec_sql(db, "VACUUM;", err, errlen) != 0)
         goto fail;
-    if (sqlite3_close(db) != SQLITE_OK) {
-        felf_set_error(err, errlen, "cannot finalize SQLite database");
-        return -1;
+    sqlite3_int64 size = 0;
+    unsigned char *image = sqlite3_serialize(db, "main", &size, 0);
+    uint8_t *copy = image != NULL && size > 0 ? malloc((size_t)size) : NULL;
+    if (copy == NULL) {
+        sqlite3_free(image);
+        felf_set_error(err, errlen, "cannot serialize SQLite database");
+        goto fail;
     }
+    memcpy(copy, image, (size_t)size);
+    sqlite3_free(image);
+    sqlite3_close(db);
+    felf_db_normalize(copy, (size_t)size);
+    *out = copy;
+    *out_size = (size_t)size;
     return 0;
 
 fail:
     sqlite3_close(db);
     return -1;
-}
-
-/* Big-endian u32 at offset AT of the database header. */
-static void put_be32(uint8_t *at, uint32_t value)
-{
-    at[0] = (uint8_t)(value >> 24);
-    at[1] = (uint8_t)(value >> 16);
-    at[2] = (uint8_t)(value >> 8);
-    at[3] = (uint8_t)value;
-}
-
-void felf_db_normalize(uint8_t *db, size_t size)
-{
-    if (size < 100)
-        return;
-    put_be32(db + 24, 1); /* file change counter */
-    put_be32(db + 40, 1); /* schema cookie */
-    put_be32(db + 92, 1); /* version-valid-for: equal to the counter */
 }

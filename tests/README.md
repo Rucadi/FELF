@@ -38,7 +38,7 @@ ctest --test-dir build/host -j 8               # parallel
 | Path | What it is |
 |---|---|
 | `hello/`, `basic/`, `cpp/`, `dlopen/`, `direct/`, `tree/`, `host/`, `exe/` | C and C++ fixture programs |
-| `multicall/`, `ownenv/`, `version/`, `include/` | Fixtures for aliases, shims, symbol versions and include warnings |
+| `multicall/`, `ownenv/`, `version/`, `include/`, `many/` | Fixtures for aliases, shims, symbol versions, include warnings and many-object FELFs |
 | `tools/mangle.c` | Damages a FELF deterministically for the corruption tests |
 | `cmake/TestUtils.cmake` | Assertions shared by the script tests |
 | `cmake/*.cmake` | One CTest test per multi-step scenario |

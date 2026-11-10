@@ -60,6 +60,18 @@ felf_assert_rc("pack with a bad --alias" 1 "${pack_alias_RESULT}")
 felf_assert_contains("bad --alias message" "${pack_alias_ERROR}"
     "expects PROGRAM=NAME")
 
+felf_run(pack_interp "${FELF}" pack "${SHORT_INTERP}" -o
+    "${CMAKE_CURRENT_BINARY_DIR}/x")
+felf_assert_rc("pack with a short PT_INTERP" 1 "${pack_interp_RESULT}")
+felf_assert_contains("short PT_INTERP message" "${pack_interp_ERROR}"
+    "is too short for FELF to rewrite")
+
+# Packing writes nothing but its output: no temporary directory is needed.
+felf_run(pack_no_tmp "${CMAKE_COMMAND}" -E env
+    "TMPDIR=${CMAKE_CURRENT_BINARY_DIR}/no-such-dir" "${FELF}" pack
+    "${HELLO}" -o "${CMAKE_CURRENT_BINARY_DIR}/no-tmp.felf")
+felf_assert_rc("pack without a temporary directory" 0 "${pack_no_tmp_RESULT}")
+
 felf_run(inspect_missing "${FELF}" inspect "${CMAKE_CURRENT_BINARY_DIR}/nope")
 felf_assert_rc("inspect a missing file" 1 "${inspect_missing_RESULT}")
 felf_assert_contains("inspect missing message" "${inspect_missing_ERROR}"

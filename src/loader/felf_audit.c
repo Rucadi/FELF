@@ -70,7 +70,7 @@ struct felf_link_map
     struct felf_link_map *l_prev;
 };
 
-static felf_uint8_t index_buffer[FELF_AUDIT_BUFFER_SIZE];
+static felf_uint8_t *index_buffer;
 static unsigned long index_size;
 static int index_initialized;
 static int index_valid;
@@ -272,22 +272,23 @@ felf_index_init (void)
     return;
   index_initialized = 1;
 
-  while (index_size < sizeof (index_buffer))
-    {
-      long n = felf_read (FELF_AUDIT_INDEX_FD, index_buffer + index_size,
-                          sizeof (index_buffer) - index_size);
-      if (n <= 0)
-        break;
-      index_size += (unsigned long) n;
-    }
-  if (index_size < sizeof (felf_audit_index_header_t))
+  /* The index is mapped, whatever its size: a private, writable copy,
+     since its strings are terminated below.
+     mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_PRIVATE, fd, 0) */
+  long size = felf_syscall3 (FELF_NR_LSEEK, FELF_AUDIT_INDEX_FD, 0, 2);
+  if (size < (long) sizeof (felf_audit_index_header_t))
     return;
+  long map = felf_syscall6 (FELF_NR_MMAP, 0, size, 3, 2,
+                            FELF_AUDIT_INDEX_FD, 0);
+  if (map < 0 && map > -4096)
+    return;
+  index_buffer = (felf_uint8_t *) map;
+  index_size = (unsigned long) size;
 
   felf_audit_index_header_t *header =
       (felf_audit_index_header_t *) index_buffer;
   if (felf_memcmp (header->magic, FELF_AUDIT_INDEX_MAGIC, 8) != 0
       || header->version != FELF_AUDIT_INDEX_VERSION
-      || header->entry_count > FELF_AUDIT_MAX_ENTRIES
       || header->pattern_count > FELF_AUDIT_MAX_PATTERNS
       || header->libpath_count > FELF_AUDIT_MAX_DIRS
       || header->default_count > FELF_AUDIT_MAX_DIRS)
@@ -329,29 +330,48 @@ felf_header (void)
   return (const felf_audit_index_header_t *) index_buffer;
 }
 
+/* strcmp() of ENTRY's name, at most FELF_AUDIT_NAME_SIZE bytes, and NAME. */
+static int
+felf_entry_cmp (const felf_audit_index_entry_t *entry, const char *name)
+{
+  for (unsigned int i = 0; i < FELF_AUDIT_NAME_SIZE; i++)
+    {
+      unsigned char a = (unsigned char) entry->name[i];
+      unsigned char b = (unsigned char) name[i];
+      if (a != b)
+        return a < b ? -1 : 1;
+      if (a == '\0')
+        return 0;
+    }
+  return -1;
+}
+
+/* The entries are sorted by name.  An absolute or search-path candidate is
+   matched by basename, so the bundled object wins even when the caller
+   names a build-store path or a tree copy of the same library. */
 static const felf_audit_index_entry_t *
 felf_index_lookup (const char *name)
 {
   if (!index_valid)
     return 0;
   const char *base = felf_basename (name);
-  for (felf_uint32_t i = 0; i < felf_header ()->entry_count; i++)
+  felf_uint32_t lo = 0, hi = felf_header ()->entry_count;
+  while (lo < hi)
     {
-      const felf_audit_index_entry_t *entry = &index_entries[i];
-      int terminated = 0;
-      for (unsigned int j = 0; j < FELF_AUDIT_PATH_SIZE; j++)
-        if (entry->path[j] == '\0')
-          {
-            terminated = 1;
-            break;
-          }
-      if (!terminated)
-        continue;
-      /* An absolute or search-path candidate is matched by basename, so the
-         bundled object wins even when the caller names a build-store path or
-         a tree copy of the same library. */
-      if (felf_strcmp (entry->name, base) == 0)
-        return entry;
+      felf_uint32_t mid = lo + (hi - lo) / 2;
+      const felf_audit_index_entry_t *entry = &index_entries[mid];
+      int c = felf_entry_cmp (entry, base);
+      if (c < 0)
+        lo = mid + 1;
+      else if (c > 0)
+        hi = mid;
+      else
+        {
+          for (unsigned int j = 0; j < FELF_AUDIT_PATH_SIZE; j++)
+            if (entry->path[j] == '\0')
+              return entry;
+          return 0;
+        }
     }
   return 0;
 }

@@ -12,8 +12,22 @@
  * caller frees. */
 int felf_read_file(const char *path, uint8_t **out, size_t *out_size,
                    char *err, size_t errlen);
-/* Create or truncate PATH with MODE and write DATA; PATH is removed again
- * on failure. */
+/* Bytes the packer embeds: the file at PATH, or, when PATH is NULL, the
+ * SIZE bytes at DATA, called NAME (a piece built into felf).  Neither set:
+ * there is no such piece. */
+typedef struct {
+    const char *path;
+    const char *name;
+    const uint8_t *data;
+    size_t size;
+} felf_source_t;
+
+/* A copy of the source's bytes in *OUT, which the caller frees. */
+int felf_source_read(const felf_source_t *source, uint8_t **out,
+                     size_t *out_size, char *err, size_t errlen);
+
+/* Create or truncate PATH with MODE (less the umask) and write DATA; PATH
+ * is removed again on failure. */
 int felf_write_file(const char *path, const uint8_t *data, size_t size,
                     mode_t mode, char *err, size_t errlen);
 

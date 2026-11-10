@@ -1,6 +1,8 @@
 #ifndef FELF_PACK_H
 #define FELF_PACK_H
 
+#include "felf_file.h"
+
 #include <stddef.h>
 
 typedef struct {
@@ -15,12 +17,14 @@ typedef struct {
     const char *const *aliases;
     size_t alias_count;
     const char *output;
-    const char *bootstrap;
-    const char *audit;
-    const char *shim;
+    /* The runtime pieces; the audit module and the shim may be absent. */
+    felf_source_t bootstrap;
+    felf_source_t audit;
+    felf_source_t shim;
     /* FELF's glibc (its libraries and patched loader), bundled with every
-     * program instead of its own; NULL: programs keep their own glibc. */
-    const char *glibc_dir;
+     * program instead of its own; none: programs keep their own glibc. */
+    const felf_source_t *glibc;
+    size_t glibc_count;
     const char *root;
     const char *const *includes;
     size_t include_count;
@@ -40,8 +44,8 @@ typedef struct {
     /* zstd level for object compression; 0 stores objects uncompressed. */
     int compress_level;
     /* glibc locale-archive embedded for the bundled glibc (felf's own,
-     * src/packer/assets.h).  Every FELF embeds one; NULL is an error. */
-    const char *locale_archive;
+     * src/packer/assets.h).  Every FELF embeds one; absent is an error. */
+    felf_source_t locale_archive;
     /* Compress libraries too (an explicit --compress LEVEL): a smaller
      * file, but they are then copied into memory at start instead of
      * being mapped from the file. */

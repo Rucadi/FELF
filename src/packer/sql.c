@@ -93,9 +93,11 @@ int felf_cmd_sql(const char *path, const char *query,
                 putchar('\'');
                 break;
             }
-            default:
-                fputs((const char *)sqlite3_column_text(stmt, i), stdout);
+            default: {
+                const char *text = (const char *)sqlite3_column_text(stmt, i);
+                fputs(text ? text : "", stdout);
                 break;
+            }
             }
         }
         putchar('\n');

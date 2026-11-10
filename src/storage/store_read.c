@@ -69,10 +69,6 @@ static int read_objects(felf_db_t *db, char *err, size_t errlen)
     }
     size_t cap = 0;
     while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
-        if (db->object_count >= FELF_MAX_OBJECTS) {
-            felf_set_error(err, errlen, "too many objects in database");
-            goto fail;
-        }
         felf_db_object_t *objects = grow(db->objects, &cap, db->object_count,
                                          sizeof(*objects));
         if (objects == NULL)
@@ -109,6 +105,21 @@ static int read_objects(felf_db_t *db, char *err, size_t errlen)
                            (long long)o->id);
             goto fail;
         }
+        /* The audit index finds a library by these names; one it cannot
+         * hold would never load. */
+        int library = strcmp(kind, "shared") == 0 ||
+                      strcmp(kind, "plugin") == 0;
+        const char *overlong =
+            !library ? NULL
+            : strlen(name) >= FELF_AUDIT_NAME_SIZE ? name
+            : soname != NULL && strlen(soname) >= FELF_AUDIT_NAME_SIZE ? soname
+            : NULL;
+        if (overlong != NULL) {
+            felf_set_error(err, errlen, "library name %s is too long (at "
+                           "most %u bytes)", overlong,
+                           FELF_AUDIT_NAME_SIZE - 1);
+            goto fail;
+        }
         memcpy(o->sha256, hash, 32);
         o->name = felf_strdup(name);
         o->soname = felf_strdup(soname);
@@ -132,6 +143,18 @@ fail:
     return -1;
 }
 
+const felf_db_object_t *felf_db_object_by_id(const felf_db_t *db, int64_t id)
+{
+    /* The packer numbers the objects 1, 2, ... in the order they are read. */
+    if (id >= 1 && (uint64_t)id <= db->object_count &&
+        db->objects[id - 1].id == id)
+        return &db->objects[id - 1];
+    for (size_t i = 0; i < db->object_count; i++)
+        if (db->objects[i].id == id)
+            return &db->objects[i];
+    return NULL;
+}
+
 /* Aliases are needed by the audit index.  They are validated here so
  * neither the bootstrap nor the loader has to trust unchecked rows. */
 static int read_aliases(felf_db_t *db, char *err, size_t errlen)
@@ -150,13 +173,12 @@ static int read_aliases(felf_db_t *db, char *err, size_t errlen)
         const char *alias = (const char *)sqlite3_column_text(stmt, 0);
         int64_t object_id = sqlite3_column_int64(stmt, 1);
         if (alias == NULL || strlen(alias) >= FELF_AUDIT_NAME_SIZE) {
-            felf_set_error(err, errlen, "invalid or overlong object alias");
+            felf_set_error(err, errlen, "object alias %s is missing or too "
+                           "long (at most %u bytes)", alias ? alias : "",
+                           FELF_AUDIT_NAME_SIZE - 1);
             goto fail;
         }
-        size_t i = 0;
-        while (i < db->object_count && db->objects[i].id != object_id)
-            i++;
-        if (i == db->object_count) {
+        if (felf_db_object_by_id(db, object_id) == NULL) {
             felf_set_error(err, errlen,
                            "alias %s references missing object %lld", alias,
                            (long long)object_id);
@@ -258,8 +280,15 @@ int felf_db_open_memory(const uint8_t *data, size_t size, felf_db_t *db,
                        sqlite3_errmsg(db->handle));
         goto fail;
     }
+    /* The database comes from a file anyone may have written: its schema
+     * gets no say in what SQL functions run, and its pages are checked. */
+    sqlite3_db_config(db->handle, SQLITE_DBCONFIG_TRUSTED_SCHEMA, 0,
+                      (int *)NULL);
+    sqlite3_db_config(db->handle, SQLITE_DBCONFIG_DEFENSIVE, 1, (int *)NULL);
     char *sqlite_err = NULL;
-    if (sqlite3_exec(db->handle, "PRAGMA query_only = ON;", NULL, NULL,
+    if (sqlite3_exec(db->handle,
+                     "PRAGMA query_only = ON; PRAGMA cell_size_check = ON;",
+                     NULL, NULL,
                      &sqlite_err) != SQLITE_OK) {
         felf_set_error(err, errlen, "cannot set database read-only: %s",
                        sqlite_err ? sqlite_err : sqlite3_errmsg(db->handle));

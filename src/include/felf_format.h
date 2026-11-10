@@ -15,7 +15,6 @@ extern "C" {
  * FELF_ZSTD_CHUNK bytes of the object (the last one shorter), so the
  * bootstrap can decompress them in parallel. */
 #define FELF_ZSTD_CHUNK (2u * 1024u * 1024u)
-#define FELF_MAX_OBJECTS 4096u
 #define FELF_MAX_NAME 255u
 
 #define FELF_FLAG_STRICT 0x00000001u

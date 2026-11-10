@@ -10,7 +10,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
 #include <unistd.h>
 
 #ifndef FELF_VERSION_STRING
@@ -65,8 +64,10 @@ static void usage(FILE *out)
         "      --lib-dir DIR          Also look for the libraries to embed in DIR\n"
         "                             (at pack time only; see below)\n"
         "      --host-lib PATTERN     Prefer the host copy of matching libraries\n"
-        "                             (name or prefix*; graphics stack by default)\n"
-        "      --no-default-host-libs Do not prefer the host graphics stack\n"
+        "                             (name or prefix*; by default the graphics\n"
+        "                             stack and NSS modules)\n"
+        "      --no-default-host-libs Do not prefer the host's graphics stack\n"
+        "                             and NSS modules\n"
         "\n",
         FELF_VERSION_STRING, DEFAULT_COMPRESS_LEVEL);
     /* Split in two: C99 compilers need only support 4095-byte strings. */
@@ -175,27 +176,15 @@ static int expand_response_files(int *argc, char ***argv)
     return 0;
 }
 
-/* The asset's path: the file named by its variable, else a copy of the
- * embedded bytes written into DIR. */
-static int asset_path(const felf_asset_t *asset, const char *dir,
-                      char *out, size_t outlen)
+/* What to embed for ASSET: the file named by its variable, else the bytes
+ * built into felf (none when this felf has no such piece). */
+static felf_source_t asset_source(const felf_asset_t *asset)
 {
     const char *env = asset->env != NULL ? getenv(asset->env) : NULL;
-    if (env != NULL && env[0] != '\0') {
-        snprintf(out, outlen, "%s", env);
-        return 0;
-    }
-    if (snprintf(out, outlen, "%s/%s", dir, asset->name) >= (int)outlen) {
-        fprintf(stderr, "felf: TMPDIR is too long\n");
-        return -1;
-    }
-    char err[512] = {0};
-    if (felf_write_file(out, asset->data, asset->size, 0600,
-                        err, sizeof(err)) != 0) {
-        fprintf(stderr, "felf: %s\n", err);
-        return -1;
-    }
-    return 0;
+    if (env != NULL && env[0] != '\0')
+        return (felf_source_t){.path = env};
+    return (felf_source_t){.name = asset->name, .data = asset->data,
+                           .size = asset->size};
 }
 
 static int push_arg(const char ***array, size_t *count, size_t *cap,
@@ -346,51 +335,27 @@ static int cmd_pack(int argc, char **argv)
         return 2;
     }
 
-    /* The packer reads its assets as files, like everything else it
-     * bundles: write the embedded ones to a private directory. */
-    const char *tmpdir = getenv("TMPDIR");
-    char dir[PATH_MAX];
-    snprintf(dir, sizeof(dir), "%s/felf-assets-XXXXXX",
-             tmpdir != NULL && tmpdir[0] != '\0' ? tmpdir : "/tmp");
-    if (mkdtemp(dir) == NULL) {
-        fprintf(stderr, "felf: cannot create %s: %s\n", dir,
-                strerror(errno));
+    size_t glibc_count = 0;
+    while (felf_glibc_assets[glibc_count].name != NULL)
+        glibc_count++;
+    felf_source_t *glibc = calloc(glibc_count ? glibc_count : 1,
+                                  sizeof(*glibc));
+    if (glibc == NULL) {
+        fprintf(stderr, "felf: out of memory\n");
         return 1;
     }
-    const felf_asset_t *const assets[] = {
-        &felf_asset_bootstrap, &felf_asset_audit, &felf_asset_shim,
-        &felf_asset_locale_archive};
-    enum { N_ASSETS = sizeof(assets) / sizeof(assets[0]) };
-    char paths[N_ASSETS][PATH_MAX];
-    char glibc[PATH_MAX];
-    snprintf(glibc, sizeof(glibc), "%s/glibc", dir);
-    int rc = 1;
-    char err[512] = {0};
-    for (size_t i = 0; i < N_ASSETS; i++)
-        if (assets[i]->name == NULL)
-            paths[i][0] = '\0'; /* not in this felf */
-        else if (asset_path(assets[i], dir, paths[i], sizeof(paths[i])) != 0)
-            goto out;
-    /* FELF's glibc, in DIR/glibc. */
-    if (mkdir(glibc, 0700) != 0) {
-        fprintf(stderr, "felf: cannot create %s: %s\n", glibc,
-                strerror(errno));
-        goto out;
-    }
-    for (const felf_asset_t *a = felf_glibc_assets; a->name != NULL; a++) {
-        char path[PATH_MAX];
-        if (asset_path(a, glibc, path, sizeof(path)) != 0)
-            goto out;
-    }
+    for (size_t i = 0; i < glibc_count; i++)
+        glibc[i] = asset_source(&felf_glibc_assets[i]);
 
     felf_pack_options_t opts = {
         .input = input,
         .output = output,
-        .bootstrap = paths[0],
-        .audit = paths[1],
-        .shim = paths[2],
+        .bootstrap = asset_source(&felf_asset_bootstrap),
+        .audit = asset_source(&felf_asset_audit),
+        .shim = asset_source(&felf_asset_shim),
         .root = root_opt,
-        .glibc_dir = glibc,
+        .glibc = glibc,
+        .glibc_count = glibc_count,
         .includes = includes,
         .include_count = include_count,
         .plugins = plugins,
@@ -402,7 +367,7 @@ static int cmd_pack(int argc, char **argv)
         .host_libs = host_libs,
         .host_lib_count = host_lib_count,
         .no_default_host_libs = no_default_host_libs,
-        .locale_archive = paths[3][0] != '\0' ? paths[3] : NULL,
+        .locale_archive = asset_source(&felf_asset_locale_archive),
         .compress_level = compress_level,
         .programs = programs,
         .program_count = program_count,
@@ -413,28 +378,14 @@ static int cmd_pack(int argc, char **argv)
         .strict = strict,
         .lazy = lazy,
     };
-    rc = felf_pack(&opts, err, sizeof(err));
+    char err[512] = {0};
+    int rc = felf_pack(&opts, err, sizeof(err));
     if (rc != 0)
         fprintf(stderr, "felf: pack: %s\n", err);
     else
         printf("wrote %s\n", output);
 
-out:
-    for (size_t i = 0; i < N_ASSETS; i++) {
-        char path[PATH_MAX];
-        if (assets[i]->name != NULL &&
-            snprintf(path, sizeof(path), "%s/%s", dir,
-                     assets[i]->name) < (int)sizeof(path))
-            unlink(path);
-    }
-    for (const felf_asset_t *a = felf_glibc_assets; a->name != NULL; a++) {
-        char path[PATH_MAX];
-        if (snprintf(path, sizeof(path), "%s/%s", glibc, a->name) <
-            (int)sizeof(path))
-            unlink(path);
-    }
-    rmdir(glibc);
-    rmdir(dir);
+    free(glibc);
     free(includes);
     free(lib_dirs);
     free(plugins);

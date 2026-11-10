@@ -1,6 +1,8 @@
 #ifndef FELF_ELF_PARSER_H
 #define FELF_ELF_PARSER_H
 
+#include "felf_file.h"
+
 #include <elf.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -32,6 +34,9 @@ typedef struct {
 /* Load and validate a little-endian ELF64 object for an architecture in
  * felf_arch.h. */
 int felf_elf_load(const char *path, felf_elf_t *elf, char *err, size_t errlen);
+/* The same for SOURCE, which messages call PATH. */
+int felf_elf_load_source(const felf_source_t *source, const char *path,
+                         felf_elf_t *elf, char *err, size_t errlen);
 void felf_elf_free(felf_elf_t *elf);
 
 /* Convert a virtual address inside a PT_LOAD segment to a file offset. */

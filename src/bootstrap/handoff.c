@@ -26,6 +26,9 @@
 #ifndef MFD_CLOEXEC
 #define MFD_CLOEXEC 0x0001U
 #endif
+#ifndef MFD_EXEC
+#define MFD_EXEC 0x0010U
+#endif
 
 /* The caller's open-file limit, saved the first time it is raised. */
 static struct rlimit caller_nofile;
@@ -77,10 +80,18 @@ int felf_memfd_alloc(const char *name, uint64_t size, int min_fd,
      * The kernel limit is 249 bytes. */
     char label[200];
     snprintf(label, sizeof(label), "felf:%s", name ? name : "object");
-    int fd = (int)syscall(SYS_memfd_create, label, MFD_CLOEXEC);
+    /* Since Linux 6.3 a memfd is only executable under vm.memfd_noexec=1
+     * when MFD_EXEC asks for it; older kernels reject the flag (EINVAL).
+     * vm.memfd_noexec=2 refuses it (EACCES): nothing can run from memory
+     * there. */
+    int fd = (int)syscall(SYS_memfd_create, label, MFD_CLOEXEC | MFD_EXEC);
+    if (fd < 0 && errno == EINVAL)
+        fd = (int)syscall(SYS_memfd_create, label, MFD_CLOEXEC);
     if (fd < 0) {
-        felf_set_error(err, errlen, "memfd_create failed: %s",
-                       strerror(errno));
+        felf_set_error(err, errlen, "memfd_create failed: %s%s",
+                       strerror(errno), errno == EACCES
+                           ? " (this system forbids executable memfds: "
+                             "sysctl vm.memfd_noexec=2)" : "");
         return -1;
     }
     if (ftruncate(fd, (off_t)size) != 0) {

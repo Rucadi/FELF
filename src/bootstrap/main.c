@@ -308,10 +308,10 @@ static int select_program(const felf_db_t *db, const char *argv0,
                        i < db->alias_count; i++) {
         if (strcmp(db->aliases[i].alias, invoked) != 0)
             continue;
-        for (size_t j = 0; j < db->object_count; j++)
-            if (db->objects[j].id == db->aliases[i].object_id &&
-                strcmp(db->objects[j].kind, "program") == 0)
-                by_name = &db->objects[j];
+        const felf_db_object_t *o =
+            felf_db_object_by_id(db, db->aliases[i].object_id);
+        if (o != NULL && strcmp(o->kind, "program") == 0)
+            by_name = o;
     }
     if (programs > 1 && db->default_program[0] == '\0')
         fallback = NULL;
@@ -392,12 +392,13 @@ static int install_links(const felf_db_t *db, const char *self,
         if (strcmp(db->objects[i].kind, "program") == 0)
             install_link(dir, db->objects[i].name, target, &self_st,
                          &made, &done, &skipped);
-    for (size_t i = 0; i < db->alias_count; i++)
-        for (size_t j = 0; j < db->object_count; j++)
-            if (db->objects[j].id == db->aliases[i].object_id &&
-                strcmp(db->objects[j].kind, "program") == 0)
-                install_link(dir, db->aliases[i].alias, target, &self_st,
-                             &made, &done, &skipped);
+    for (size_t i = 0; i < db->alias_count; i++) {
+        const felf_db_object_t *o =
+            felf_db_object_by_id(db, db->aliases[i].object_id);
+        if (o != NULL && strcmp(o->kind, "program") == 0)
+            install_link(dir, db->aliases[i].alias, target, &self_st,
+                         &made, &done, &skipped);
+    }
     fprintf(stderr, "felf: %zu link%s created in %s, %zu already there, "
             "%zu not created\n", made, made == 1 ? "" : "s", dir, done,
             skipped);
@@ -425,6 +426,14 @@ int main(int argc, char **argv, char **envp)
     (void)argc;
     const char *dbg = getenv(FELF_ENV_DEBUG);
     debug_enabled = dbg != NULL && dbg[0] != '\0' && strcmp(dbg, "0") != 0;
+
+    /* glibc ignores LD_AUDIT and LD_PRELOAD paths in a set-user-ID
+     * process, so the program could not find its libraries; and nothing
+     * here is written to be driven by another user's environment. */
+    if (getuid() != geteuid() || getgid() != getegid()) {
+        fail("set-user-ID and set-group-ID FELF files are not supported");
+        return 127;
+    }
 
     char self[PATH_MAX];
     if (find_self(self, sizeof(self)) != 0) {
@@ -774,7 +783,10 @@ int main(int argc, char **argv, char **envp)
         execve(program_path, argv, new_env);
         saved = errno;
     }
-    fail("cannot execute embedded program: %s", strerror(saved));
+    fail("cannot execute embedded program: %s%s", strerror(saved),
+         saved == EACCES ? " (does this system forbid running programs "
+                           "from memory? sysctl vm.memfd_noexec, SELinux)"
+                         : "");
     return 127;
 
 out:

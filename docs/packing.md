@@ -12,7 +12,7 @@ line.
 
 | Option | Effect |
 |---|---|
-| `-o PATH` | Output, written to a temporary file and renamed |
+| `-o PATH` | Output, written to a temporary file and renamed; mode 0755 less the umask |
 | `--program [NAME=]PATH` | Another program sharing the libraries, run when invoked as NAME. The same file twice becomes an alias. |
 | `--alias PROG=NAME[,NAME…]` | More names for a multicall program; it runs with NAME as `argv[0]` |
 | `--compress LEVEL\|none` | See [compression](#compression) |
@@ -24,7 +24,7 @@ line.
 | `--env NAME=VALUE` | Set a variable for the program; `$FELF_ROOT`, `$FELF_APP`, `$VAR`, `$$` are expanded at start |
 | `--lib-dir DIR` | Extra directory to find libraries in, at pack time only |
 | `--host-lib PATTERN` | Prefer the host's copy of a library (name, or prefix ending in `*`) |
-| `--no-default-host-libs` | Don't prefer the host's graphics stack |
+| `--no-default-host-libs` | Don't prefer the host's graphics stack and NSS modules |
 
 `FELF_BOOTSTRAP`, `FELF_AUDIT` and `FELF_SHIM` name files to embed instead
 of the ones built into `felf`, for example builds for another architecture.
@@ -65,7 +65,10 @@ flowchart TD
   object (`DT_VERNEED`, except weak ones) must be defined there. A program
   built for a newer glibc fails: `… needs version GLIBC_x of libc.so.6,
   which the bundled libc.so.6 … does not define`.
-- **Names** are unique, and program names have no `/`.
+- **Names** are unique, and program names have no `/`. Library names are
+  at most 127 bytes.
+- **`PT_INTERP`** is at least 18 characters, the room the bootstrap needs to
+  point it at the bundled loader. Every usual glibc loader path is longer.
 
 ## Compression
 
@@ -107,7 +110,13 @@ The **graphics stack** always comes from the host: libglvnd (`libGL`,
 `libEGL`, `libGLX`, `libOpenGL`, GLES), vendor drivers (`libGLX_*`,
 `libEGL_*`, `libnvidia-*`, `libgallium-*`), Vulkan, DRM/GBM, VA-API/VDPAU
 and CUDA (`src/include/felf_host_libs.h`). A copy found at pack time is
-embedded and used only if the host has none. Host libraries run against
+embedded and used only if the host has none.
+
+**NSS modules** (`libnss_*`) come from the host too: `/etc/nsswitch.conf`
+names the host's sources of users, groups and hosts (`systemd`, `sss`,
+`ldap`, `mdns`…), and glibc loads `libnss_<source>.so.2` for each. A module
+that can't load is skipped, as NSS does natively. `files` and `dns` are
+built into glibc. Host libraries run against
 FELF's glibc, so one built for a newer glibc won't load.
 
 **Plugins** are never embedded. `--plugin` embeds only their dependencies.

@@ -65,6 +65,9 @@ int felf_db_open_memory(const uint8_t *data, size_t size, felf_db_t *db,
                         char *err, size_t errlen);
 void felf_db_close(felf_db_t *db);
 
+/* The object with this id, or NULL. */
+const felf_db_object_t *felf_db_object_by_id(const felf_db_t *db, int64_t id);
+
 /* Validate that every object record points at a bounded, aligned part of
  * the payload region. */
 int felf_db_validate_layout(const felf_db_t *db, uint64_t container_size,

@@ -4,6 +4,7 @@
 #include "felf_file.h"
 #include "felf_host_libs.h"
 
+#include <elf.h>
 #include <errno.h>
 #include <limits.h>
 #include <stdarg.h>
@@ -106,7 +107,6 @@ void felf_resolver_free(felf_resolver_t *r)
         free(r->search_dirs[i]);
     free(r->search_dirs);
     free(r->root);
-    free(r->glibc_dir);
     free(r->program_interp);
     free(r->default_program);
     free(r->program_locations);
@@ -202,17 +202,16 @@ static int add_alias(felf_object_t *o, const char *alias)
     return 0;
 }
 
-/* Add an object loaded from PATH.  If the object is already present by
- * canonical path, add the requested alias and return it instead. */
-static felf_object_t *add_object(felf_resolver_t *r, const char *path,
-                                 const char *kind, const char *requested_name,
-                                 char *err, size_t errlen)
+/* Add the object in SOURCE, known as USE_PATH (and asked for as PATH).  If
+ * an object with that path is already present, add the requested alias and
+ * return it instead. */
+static felf_object_t *add_object_from(felf_resolver_t *r,
+                                      const felf_source_t *source,
+                                      const char *use_path, const char *path,
+                                      const char *kind,
+                                      const char *requested_name,
+                                      char *err, size_t errlen)
 {
-    char canonical[PATH_MAX];
-    const char *use_path = path;
-    if (realpath(path, canonical) != NULL)
-        use_path = canonical;
-
     felf_object_t *existing = find_by_path(r, use_path);
     if (existing != NULL) {
         /* An object kept outside the container that something embedded
@@ -236,7 +235,7 @@ static felf_object_t *add_object(felf_resolver_t *r, const char *path,
     }
 
     felf_elf_t elf;
-    if (felf_elf_load(use_path, &elf, err, errlen) != 0)
+    if (felf_elf_load_source(source, use_path, &elf, err, errlen) != 0)
         return NULL;
     if (r->arch != NULL && elf.ehdr.e_machine != r->arch->machine) {
         felf_set_error(err, errlen, "%s is not built for %s", use_path,
@@ -323,6 +322,51 @@ static felf_object_t *add_object(felf_resolver_t *r, const char *path,
     felf_elf_free(&elf);
     r->count++;
     return o;
+}
+
+/* Add the file at PATH, known by its canonical path. */
+static felf_object_t *add_object(felf_resolver_t *r, const char *path,
+                                 const char *kind, const char *requested_name,
+                                 char *err, size_t errlen)
+{
+    char canonical[PATH_MAX];
+    const char *use_path = realpath(path, canonical) ? canonical : path;
+    felf_source_t source = {.path = use_path};
+    return add_object_from(r, &source, use_path, path, kind, requested_name,
+                           err, errlen);
+}
+
+/* Add SOURCE: a file, or a piece built into felf, whose path is then
+ * "<felf>/NAME" (no file has it). */
+static felf_object_t *add_source(felf_resolver_t *r,
+                                 const felf_source_t *source,
+                                 const char *kind, const char *requested_name,
+                                 char *err, size_t errlen)
+{
+    if (source->path != NULL)
+        return add_object(r, source->path, kind, requested_name, err, errlen);
+    char path[PATH_MAX];
+    snprintf(path, sizeof(path), "<felf>/%s", source->name);
+    return add_object_from(r, source, path, path, kind, requested_name,
+                           err, errlen);
+}
+
+/* The file NAME of FELF's glibc, when it is an ELF object for the target
+ * (as is_candidate() asks of a file in a search directory). */
+static const felf_source_t *glibc_file(const felf_resolver_t *r,
+                                       const char *name)
+{
+    for (size_t i = 0; i < r->glibc_count; i++) {
+        const felf_source_t *s = &r->glibc[i];
+        if (strcmp(s->name, name) != 0)
+            continue;
+        const uint8_t *d = s->data;
+        return s->size >= sizeof(Elf64_Ehdr) &&
+               memcmp(d, ELFMAG, SELFMAG) == 0 &&
+               d[EI_CLASS] == ELFCLASS64 && d[EI_DATA] == ELFDATA2LSB &&
+               (d[18] | d[19] << 8) == r->arch->machine ? s : NULL;
+    }
+    return NULL;
 }
 
 /* Nonzero when DIR/NAME is a loadable ELF object for the target; the path
@@ -477,6 +521,7 @@ static int resolve_name(felf_resolver_t *r, felf_object_t *requester,
 
     char path[PATH_MAX];
     path[0] = '\0';
+    const felf_source_t *glibc = NULL;
 
     if (strchr(name, '/') != NULL) {
         if (name[0] == '/') {
@@ -495,8 +540,7 @@ static int resolve_name(felf_resolver_t *r, felf_object_t *requester,
     } else {
         /* glibc's libraries come from FELF's glibc, whatever the
          * requester's RUNPATH says. */
-        if ((r->direct_map &&
-             is_candidate(r, r->glibc_dir, name, path, sizeof(path))) ||
+        if ((r->direct_map && (glibc = glibc_file(r, name)) != NULL) ||
             search_requester_paths(r, name, requester->path,
                                    requester->rpath, requester->runpath,
                                    path, sizeof(path)) ||
@@ -514,7 +558,9 @@ static int resolve_name(felf_resolver_t *r, felf_object_t *requester,
         }
     }
 
-    felf_object_t *o = add_object(r, path, "shared", name, err, errlen);
+    felf_object_t *o =
+        glibc != NULL ? add_source(r, glibc, "shared", name, err, errlen)
+                      : add_object(r, path, "shared", name, err, errlen);
     if (o == NULL)
         return -1;
     if (add_alias(o, name) != 0) {
@@ -630,6 +676,17 @@ static int add_program_object(felf_resolver_t *r, const char *path,
         felf_elf_free(&elf);
         return -1;
     }
+    /* The bootstrap writes the loader's /proc/self/fd path over PT_INTERP
+     * at every start; descriptors start at FELF_FD_BASE. */
+    if (strlen(elf.interp) < strlen("/proc/self/fd/1000")) {
+        felf_set_error(err, errlen,
+                       "%s: PT_INTERP \"%s\" is too short for FELF to "
+                       "rewrite (link with a --dynamic-linker path of at "
+                       "least %zu characters)", path, elf.interp,
+                       strlen("/proc/self/fd/1000"));
+        felf_elf_free(&elf);
+        return -1;
+    }
     char interp[PATH_MAX];
     snprintf(interp, sizeof(interp), "%s", elf.interp);
     /* The first program selects the target; add_object() checks the rest. */
@@ -658,20 +715,17 @@ static int add_program_object(felf_resolver_t *r, const char *path,
      * every program's own: its loader is bundled, glibc's libraries are
      * taken from it (resolve_name), and the loader maps the uncompressed
      * libraries from the file. */
-    char glibc_loader[PATH_MAX] = "";
-    if (r->glibc_dir != NULL)
-        snprintf(glibc_loader, sizeof(glibc_loader), "%s/%s", r->glibc_dir,
-                 r->arch->interp);
-    if (glibc_loader[0] != '\0' && is_regular_file(glibc_loader)) {
+    const felf_source_t *glibc_loader = glibc_file(r, r->arch->interp);
+    if (glibc_loader != NULL) {
         if (r->direct_map)
             return 0;
-        felf_object_t *li = add_object(r, glibc_loader, "interp", NULL,
+        felf_object_t *li = add_source(r, glibc_loader, "interp", NULL,
                                        err, errlen);
         if (li == NULL)
             return -1;
         add_alias(li, "ld-linux.so.2");
         r->direct_map = 1;
-        return add_standard_dirs(r, glibc_loader, err, errlen);
+        return add_standard_dirs(r, NULL, err, errlen);
     }
 
     /* Otherwise the program's PT_INTERP: the FELF bundles that dynamic
@@ -710,16 +764,16 @@ static int add_program_object(felf_resolver_t *r, const char *path,
 }
 
 
-int felf_resolver_add_audit(felf_resolver_t *r, const char *path,
+int felf_resolver_add_audit(felf_resolver_t *r, const felf_source_t *source,
                             char *err, size_t errlen)
 {
-    return add_object(r, path, "audit", NULL, err, errlen) ? 0 : -1;
+    return add_source(r, source, "audit", NULL, err, errlen) ? 0 : -1;
 }
 
-int felf_resolver_add_runtime(felf_resolver_t *r, const char *path,
+int felf_resolver_add_runtime(felf_resolver_t *r, const felf_source_t *source,
                               char *err, size_t errlen)
 {
-    return add_object(r, path, "runtime", NULL, err, errlen) ? 0 : -1;
+    return add_source(r, source, "runtime", NULL, err, errlen) ? 0 : -1;
 }
 
 int felf_resolver_add_env(felf_resolver_t *r, const char *entry,
@@ -753,12 +807,14 @@ int felf_resolver_add_env(felf_resolver_t *r, const char *entry,
     return 0;
 }
 
-int felf_resolver_add_resource(felf_resolver_t *r, const char *path,
+int felf_resolver_add_resource(felf_resolver_t *r,
+                               const felf_source_t *source,
                                const char *name, char *err, size_t errlen)
 {
+    const char *path = source->path ? source->path : name;
     uint8_t *data;
     size_t size;
-    if (felf_read_file(path, &data, &size, err, errlen) != 0)
+    if (felf_source_read(source, &data, &size, err, errlen) != 0)
         return -1;
     if (r->count == r->cap) {
         size_t newcap = r->cap ? r->cap * 2 : 16;
